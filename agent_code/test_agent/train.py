@@ -3,8 +3,9 @@ import random
 from collections import namedtuple, deque
 from typing import List
 
+from callbacks import state_to_features
 import events as e
-from .callbacks import state_to_features
+
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -96,3 +97,12 @@ def reward_from_events(self, events: List[str]) -> int:
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
+
+
+def q_learning():
+    """
+    Generic Q-learning algorithm.
+    """
+
+
+    return
