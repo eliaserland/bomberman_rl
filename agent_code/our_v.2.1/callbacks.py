@@ -55,7 +55,7 @@ def act(self, game_state: dict) -> str:
     """
     
     ########### (1) only allow valid actions: #############
-    mask, VALIDE_ACTIONS, p =  get_valide_action(game_state)
+    mask, VALIDE_ACTIONS, p =  get_valid_action(game_state)
     
     ########### (2) When in Training mode: #############
     # todo Exploration vs exploitation: take a decaying exploration rate
@@ -150,7 +150,7 @@ def state_to_features(game_state: dict) -> np.array:
     # is between two invalide field vertical (do L and R, not U and D)
     # somewhere else (not L and R, not U and D)
     # will increase number of states with a factor 3
-    mask, VALIDE_ACTIONS, p =  get_valide_action(game_state)
+    mask, VALIDE_ACTIONS, p =  get_valid_action(game_state)
     
     relative_position_vertical = 0
     relative_position_horizintal = 0
@@ -166,50 +166,53 @@ def state_to_features(game_state: dict) -> np.array:
     return features.reshape(-1)
 
 
-def get_valide_action(game_state: dict):
+def get_valid_action(game_state: dict):
     """
-    Given the gamestate, check which actions are valide.
+    Given the gamestate, check which actions are valid.
 
     :param game_state:  A dictionary describing the current game board.
     :return: mask which ACTIONS executable
-             list of VALIDE_ACTIONS
-             uniform random distribution for VALID_ACTIONS
+             list of VALID_ACTIONS
+             uniform random distribution for VALID_ACTIONS (#TODO not uniform dist.)
     """
+    aggressive_play = True # Allow agent to drop bombs or not. 
 
-    # Gather information about the game state
-    arena = game_state['field']
+    # Gather information about the game state.
+    arena    = game_state['field']
     _, score, bombs_left, (x, y) = game_state['self']
-    bombs = game_state['bombs']
+    bombs    = game_state['bombs']
     bomb_xys = [xy for (xy, t) in bombs]
-    others = [xy for (n, s, b, xy) in game_state['others']]
-    coins = game_state['coins']
+    others   = [xy for (n, s, b, xy) in game_state['others']]
+    coins    = game_state['coins']
     bomb_map = game_state['explosion_map']
     
-    # check for valid actions
-    directions = [(x, y), (x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-    valid_tiles, valid_actions = [], []
-    for d in directions:
-        if ((arena[d] == 0) and
-            (game_state['explosion_map'][d] <= 1) and
-            (not d in others) and
-            (not d in bomb_xys)):
-            valid_tiles.append(d)
-    if (x , y - 1) in valid_tiles: valid_actions.append(1) # UP
-    else: valid_actions.append(0)
-    if (x + 1, y) in valid_tiles: valid_actions.append(1) # RIGHT
-    else: valid_actions.append(0)   
-    if (x, y + 1) in valid_tiles: valid_actions.append(1) # DOWN
-    else: valid_actions.append(0)
-    if (x -1 , y ) in valid_tiles: valid_actions.append(1) # LEFT
-    else: valid_actions.append(0)
-    if (x, y) in valid_tiles: valid_actions.append(1) # WAIT
-    else: valid_actions.append(0)
-    if (bombs_left > 0) : valid_actions.append(0)  # BOMB drop bomb alwas impossible
-    else: valid_actions.append(0)
+    # Check for valid actions.
+    #            ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT']
+    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)] 
+    valid_actions = []
+    mask = np.zeros(len(ACTIONS))
     
-    #create mask which only allows valid move
-    mask = (np.array(valid_actions)==1)
-    VALIDE_ACTIONS = np.array(ACTIONS)[mask]
-    p = np.random.dirichlet(np.ones(len(VALIDE_ACTIONS)),size=1)[0] 
+    # Movement:
+    for i, d in enumerate(directions):
+        if ((arena[d] == 0)    and  # Is a free tile
+            (bomb_map[d] <= 1) and  # No ongoing explosion
+            (not d in others)  and  # Not occupied by other player
+            (not d in bomb_xys)):   # No bomb placed
+            valid_actions.append(ACTIONS[i]) # Append the valid action.
+            mask[i] = 1
     
-    return mask, VALIDE_ACTIONS, p
+    # Bombing:
+    if (bombs_left > 0) and aggressive_play: 
+        valid_actions.append(ACTIONS[-1])
+        mask[-1] = 1
+    
+    # Create mask of the valid moves.
+    mask = (mask == 1)
+    
+    # Convert list to numpy array (# TODO Is this neccesary?)
+    valid_actions = np.array(valid_actions)
+
+    # Corresponding probabilites from Dirichlet dist.
+    p = np.random.dirichlet(np.ones(len(valid_actions)), size=1)[0] 
+    
+    return mask, valid_actions, p
