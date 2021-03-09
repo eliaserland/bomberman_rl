@@ -35,7 +35,7 @@ def setup(self):
         self.logger.info("Setting up model from scratch.")
         #self.q_table = np.zeros((3*4*((s.COLS-2)*(s.ROWS-2)), self.action_size))   #initi a q_table which has as many states as possible distances to coin possible
         #self.q_table = np.load("my-q-table_increase_featurespace-alpha=0.01.npy")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.1))
         
     else:
         self.logger.info("Loading model from saved state.")
@@ -122,7 +122,7 @@ def state_to_features(game_state: dict) -> np.array:
     max_distance_x = s.ROWS - 2 #s.ROWS - 3 ? 
     max_distance_y = s.COLS - 2
 
-    # (1) get relative,normlaized step distances to closest coin
+    # (1) get relative step distances to closest coin as one auto hot encoder
     coins_info = []
     for coin in coins:
         x_coin_dis = coin[0] - x
