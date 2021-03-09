@@ -55,7 +55,7 @@ def act(self, game_state: dict) -> str:
     """
     
     ########### (1) only allow valid actions: #############
-    mask, VALIDE_ACTIONS, p =  get_valid_action(game_state)
+    mask, VALID_ACTIONS, p =  get_valid_action(game_state)
     
     ########### (2) When in Training mode: #############
     # todo Exploration vs exploitation: take a decaying exploration rate
@@ -63,15 +63,15 @@ def act(self, game_state: dict) -> str:
         random_prob = self.epsilon 
         if random.random() < random_prob or self.is_init:
             self.logger.debug("Choosing action purely at random.")
-            execute_action = np.random.choice(VALIDE_ACTIONS)
-            #print(VALIDE_ACTIONS, execute_action , p)
+            execute_action = np.random.choice(VALID_ACTIONS)
+            #print(VALID_ACTIONS, execute_action , p)
             return execute_action
         else:
             self.logger.debug("Choosing action from highes q_value.")
             
             # choose only from q_values which are valid actions: 
             q_values = self.model.predict(state_to_features(game_state).reshape(1, -1))[0][mask]
-            execute_action = VALIDE_ACTIONS[np.argmax(q_values)]
+            execute_action = VALID_ACTIONS[np.argmax(q_values)]
             return execute_action
 
     ########### (3) When in Game mode: #############
@@ -80,14 +80,14 @@ def act(self, game_state: dict) -> str:
         random_prob = 0.81
         if random.random() < random_prob:
             self.logger.debug("Choosing action purely at random.")
-            execute_action = np.random.choice(VALIDE_ACTIONS)
-            #print(VALIDE_ACTIONS, execute_action , p)
+            execute_action = np.random.choice(VALID_ACTIONS)
+            #print(VALID_ACTIONS, execute_action , p)
             return execute_action
         
         # choose only from q_values which are valid actions: 
         q_values = self.model.predict(state_to_features(game_state).reshape(1, -1))[0][mask]
         #print(q_values, state_to_features(game_state))
-        execute_action = VALIDE_ACTIONS[np.argmax(q_values)]
+        execute_action = VALID_ACTIONS[np.argmax(q_values)]
         self.logger.debug("Querying model for action.")
         return execute_action
 
@@ -146,20 +146,20 @@ def state_to_features(game_state: dict) -> np.array:
         v = closest_coin_info[1]/closest_coin_info[2]  
 
     # (2) encounter for relative postion of agent in arena: 
-    # is between two invalide field horizontal (not L and R, do U and D)
-    # is between two invalide field vertical (do L and R, not U and D)
+    # is between two invalid field horizontal (not L and R, do U and D)
+    # is between two invalid field vertical (do L and R, not U and D)
     # somewhere else (not L and R, not U and D)
     # will increase number of states with a factor 3
-    mask, VALIDE_ACTIONS, p =  get_valid_action(game_state)
+    mask, VALID_ACTIONS, p =  get_valid_action(game_state)
     
     relative_position_vertical = 0
     relative_position_horizintal = 0
     
-    if 'RIGHT' not in VALIDE_ACTIONS and 'LEFT' not in VALIDE_ACTIONS:
-        relative_position_horizintal = 1  # between_invalide_horizintal
+    if 'RIGHT' not in VALID_ACTIONS and 'LEFT' not in VALID_ACTIONS:
+        relative_position_horizintal = 1  # between_invalid_horizintal
     
-    if 'UP' not in VALIDE_ACTIONS and 'DOWN' not in VALIDE_ACTIONS:
-        relative_position_vertical = 1  # between_invalide_vertical
+    if 'UP' not in VALID_ACTIONS and 'DOWN' not in VALID_ACTIONS:
+        relative_position_vertical = 1  # between_invalid_vertical
     
     features = np.array([h , v , relative_position_horizintal , relative_position_vertical])
     # print(features.reshape(-1))
