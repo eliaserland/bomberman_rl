@@ -55,7 +55,7 @@ def act(self, game_state: dict) -> str:
     """
     
     ########### (1) only allow valid actions: #############
-    mask, VALID_ACTIONS, p =  get_valid_action(game_state)
+    mask, valid_actions, p =  get_valid_action(game_state)
     
     ########### (2) When in Training mode: #############
     # todo Exploration vs exploitation: take a decaying exploration rate
@@ -63,15 +63,15 @@ def act(self, game_state: dict) -> str:
         random_prob = self.epsilon 
         if random.random() < random_prob or self.is_init:
             self.logger.debug("Choosing action purely at random.")
-            execute_action = np.random.choice(VALID_ACTIONS)
-            #print(VALID_ACTIONS, execute_action , p)
+            execute_action = np.random.choice(valid_actions)
+            #print(valid_actions, execute_action , p)
             return execute_action
         else:
             self.logger.debug("Choosing action from highes q_value.")
             
             # choose only from q_values which are valid actions: 
             q_values = self.model.predict(state_to_features(game_state).reshape(1, -1))[0][mask]
-            execute_action = VALID_ACTIONS[np.argmax(q_values)]
+            execute_action = valid_actions[np.argmax(q_values)]
             return execute_action
 
     ########### (3) When in Game mode: #############
@@ -80,14 +80,14 @@ def act(self, game_state: dict) -> str:
         random_prob = 0.81
         if random.random() < random_prob:
             self.logger.debug("Choosing action purely at random.")
-            execute_action = np.random.choice(VALID_ACTIONS)
-            #print(VALID_ACTIONS, execute_action , p)
+            execute_action = np.random.choice(valid_actions)
+            #print(valid_actions, execute_action , p)
             return execute_action
         
         # choose only from q_values which are valid actions: 
         q_values = self.model.predict(state_to_features(game_state).reshape(1, -1))[0][mask]
         #print(q_values, state_to_features(game_state))
-        execute_action = VALID_ACTIONS[np.argmax(q_values)]
+        execute_action = valid_actions[np.argmax(q_values)]
         self.logger.debug("Querying model for action.")
         return execute_action
 
@@ -150,15 +150,15 @@ def state_to_features(game_state: dict) -> np.array:
     # is between two invalid field vertical (do L and R, not U and D)
     # somewhere else (not L and R, not U and D)
     # will increase number of states with a factor 3
-    mask, VALID_ACTIONS, p =  get_valid_action(game_state)
+    mask, valid_actions, p =  get_valid_action(game_state)
     
     relative_position_vertical = 0
     relative_position_horizintal = 0
     
-    if 'RIGHT' not in VALID_ACTIONS and 'LEFT' not in VALID_ACTIONS:
+    if 'RIGHT' not in valid_actions and 'LEFT' not in valid_actions:
         relative_position_horizintal = 1  # between_invalid_horizintal
     
-    if 'UP' not in VALID_ACTIONS and 'DOWN' not in VALID_ACTIONS:
+    if 'UP' not in valid_actions and 'DOWN' not in valid_actions:
         relative_position_vertical = 1  # between_invalid_vertical
     
     features = np.array([h , v , relative_position_horizintal , relative_position_vertical])
@@ -172,8 +172,8 @@ def get_valid_action(game_state: dict):
 
     :param game_state:  A dictionary describing the current game board.
     :return: mask which ACTIONS executable
-             list of VALID_ACTIONS
-             uniform random distribution for VALID_ACTIONS (#TODO not uniform dist.)
+             list of valid_actions
+             uniform random distribution for valid_actions (#TODO not uniform dist.)
     """
     aggressive_play = True # Allow agent to drop bombs or not. 
 
