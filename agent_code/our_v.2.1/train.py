@@ -26,7 +26,7 @@ EXPLORATION_DECAY        = 0.9995
 GAMMA                    = 0.90
 
 
-# Events
+# Custom events
 SURVIVED_STEP            = "SURVIVED_STEP"
 DIED_DIRECT_NEXT_TO_BOMB = "DIED_DIRECT_NEXT_TO_BOMB"
 ALREADY_KNOW_FIELD       = "ALREADY_KNOW_FIELD"
@@ -55,10 +55,10 @@ def setup_training(self):
     self.number_game             = 0
     self.collected_coins_in_game = 0
     
-    self.scores = []
-    self.games = []
+    self.scores           = []
+    self.games            = []
     self.exploration_rate = []
-    self.collected_coins = []
+    self.collected_coins  = []
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -86,26 +86,26 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         _, score, bombs_left, (x, y) = old_game_state['self']
         closest_coin_info_old = closets_coin_distance(old_game_state)
 
-        # penalty on loops:
-        # If agent has been in the same location three times recently, it's a loop
-        if self.coordinate_history.count((x, y)) > 1:
+        # Penalty on loops:
+        coord_hist_count = self.coordinate_history.count((x, y))
+        if coord_hist_count > 1:
+            # Position visited twice within 20 steps
             events.append(ALREADY_KNOW_FIELD)
-            if self.coordinate_history.count((x, y)) > 2:
+            if coord_hist_count > 2:
+                # Position visited thrice within 20 steps.
                 events.append(BACK_AND_FORTH)
-
         self.coordinate_history.append((x, y))
 
-        # penalty on going away from coin vs reward for going closer: 
+        # Penalty on going away from coin vs reward for going closer: 
         if new_game_state:
             closest_coin_info_new = closets_coin_distance(new_game_state)
-
             if (closest_coin_info_old - closest_coin_info_new) < 0:
                 events.append(CLOSER_TO_COIN)
             else:
                 events.append(AWAY_FROM_COIN)
 
         if 'GOT_KILLED' in events:
-            # closer to bomb gives higher penalty:
+            # closer to bomb gives higher penalty: #TODO what is this?
             bombs = old_game_state['bombs']
             bomb_xys = [xy for (xy, t) in bombs]
 
@@ -126,7 +126,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if 'COIN_COLLECTED' in events:
         self.collected_coins_in_game += 1
     
-    ################## (2) Store Transision: #################
+    ################## (2) Store Transition: #################
     
     # state_to_features is defined in callbacks.py
     self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
@@ -252,22 +252,22 @@ def reward_from_events(self, events: List[str]) -> int:
         # AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         # 2*AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         
-        e.MOVED_LEFT: 0,
+        e.MOVED_LEFT:  0,
         e.MOVED_RIGHT: 0,
-        e.MOVED_UP: 0,
-        e.MOVED_DOWN: 0,
-        e.WAITED: 0,  # could punish for waiting
+        e.MOVED_UP:    0,
+        e.MOVED_DOWN:  0,
+        e.WAITED:      0,  # could punish for waiting
         e.INVALID_ACTION: -survive_step,
         
-        e.BOMB_DROPPED: -0.1,
-        e.BOMB_EXPLODED: 0,
+        e.BOMB_DROPPED:     -0.1,
+        e.BOMB_EXPLODED:       0,
 
-        e.CRATE_DESTROYED: 1,
-        e.COIN_FOUND: 1,
-        e.COIN_COLLECTED: 20,
+        e.CRATE_DESTROYED:      1,
+        e.COIN_FOUND:           1,
+        e.COIN_COLLECTED:      20,
 
-        e.KILLED_OPPONENT: 0,
-        e.KILLED_SELF: -6* survive_step,   # maybe include later that distance to bomb is included in penatly 
+        e.KILLED_OPPONENT:      0,
+        e.KILLED_SELF: -6* survive_step,   # maybe include later that distance to bomb is included in penalty 
 
         e.GOT_KILLED: 0,
         e.OPPONENT_ELIMINATED: 0,

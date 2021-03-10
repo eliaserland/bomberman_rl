@@ -171,7 +171,7 @@ def get_valid_action(game_state: dict):
              list of valid_actions
              uniform random distribution for valid_actions (#TODO not uniform dist.)
     """
-    aggressive_play = True # Allow agent to drop bombs or not. 
+    aggressive_play = True # Allow agent to drop bombs. 
 
     # Gather information about the game state.
     arena    = game_state['field']
