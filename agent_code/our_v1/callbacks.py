@@ -28,8 +28,8 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
+    self.actions     = ACTIONS
     self.action_size = len(ACTIONS)
-    self.actions = ACTIONS
         
     if self.train:
         self.logger.info("Setting up model from scratch.")
@@ -73,7 +73,7 @@ def act(self, game_state: dict) -> str:
         
     ########### (3) When in Game mode: #############
     else:
-        random_prob = 0.81
+        random_prob = 0.1
         if random.random() < random_prob:
             # Uniformly & randomly picking a action from subset of valid actions.
             self.logger.debug("Choosing action purely at random.")
@@ -158,7 +158,7 @@ def state_to_features(game_state: dict) -> np.array:
     
     features = np.array([h, v, relative_position_horizontal, relative_position_vertical])
 
-    return features.reshape(-1) # Flatten array.
+    return features.reshape(1,-1) # Generate (1,D) array.
 
 
 

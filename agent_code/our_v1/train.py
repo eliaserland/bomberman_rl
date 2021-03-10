@@ -19,7 +19,7 @@ Transition = namedtuple('Transition',
 TRANSITION_HISTORY_SIZE  = 5000   # keep only ... last transitions
 BATCH_SIZE               = 3000
 RECORD_ENEMY_TRANSITIONS = 1.0    # record enemy transitions with probability ...
-EXPLORATION_MAX          = 1  
+EXPLORATION_MAX          = 1
 EXPLORATION_MIN          = 0.2
 EXPLORATION_DECAY        = 0.9995
 #LEARNING_RATE           = 0.01  # test 0.05
@@ -81,7 +81,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     ################# (1) Add own events to hand out rewards #################
-                
+
     if old_game_state:
         _, score, bombs_left, (x, y) = old_game_state['self']
         closest_coin_info_old = closets_coin_distance(old_game_state)
@@ -89,14 +89,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         # Penalty on loops:
         coord_hist_count = self.coordinate_history.count((x, y))
         if coord_hist_count > 1:
-            # Position visited twice within 20 steps
+            # Position visited twice within last 10 steps
             events.append(ALREADY_KNOW_FIELD)
             if coord_hist_count > 2:
-                # Position visited thrice within 20 steps.
+                # Position visited thrice within last 10 steps.
                 events.append(BACK_AND_FORTH)
         self.coordinate_history.append((x, y))
 
-        # Penalty on going away from coin vs reward for going closer: 
+        # Penalty on going away from coin vs reward for going closer:
         if new_game_state:
             closest_coin_info_new = closets_coin_distance(new_game_state)
             if (closest_coin_info_old - closest_coin_info_new) < 0:
@@ -128,7 +128,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     
     ################## (2) Store Transition: #################
     
-    # state_to_features is defined in callbacks.py
     self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
     
     ################# (3) For evaluation purposes: #################
@@ -148,39 +147,53 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
+
+    # Append transition to the last game state.
     self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
 
     ################# (1) Decrease the exploration rate: #################
     if self.epsilon > EXPLORATION_MIN:
         self.epsilon *= EXPLORATION_DECAY
         
-    ################## (2) Do q-learning with batch: #################
+    ################# (2) Do q-learning with batch: #################
     
     if len(self.transitions) > BATCH_SIZE: 
-        #print('start training')
+
+        # Get random batch from experience buffer.
         batch = random.sample(self.transitions, BATCH_SIZE)
-        X = []
-        targets = []
-        for state, action, state_next, reward in batch:
-            q_update = reward
+        
+        # Allocate feature matrix and target vector.
+        X, targets = [], []
+
+        # For each transition in the batch:
+        for state, action, state_next, reward in batch:            
+            
+            q_update = reward #TODO what is this?
+
+            # If the old state is not the state before a game.
             if state is not None:
-                if state_next is not None:
+            
+                # If the new state is not the state after a game.
+                if state_next is not None: # TODO? is this really neccessary?
                     if self.is_init:
                         q_update = reward
                     else:
-                        maximal_response = np.max(self.model.predict(state_next.reshape(1, -1)))
+                        maximal_response = np.max(self.model.predict(state_next))
                         q_update = (reward + GAMMA * maximal_response)
 
-                if self.is_init: q_values = np.zeros(self.action_size).reshape(1, -1)
+                if self.is_init: 
+                    q_values = np.zeros(self.action_size).reshape(1, -1)
+                else: 
+                    q_values = self.model.predict(state)
 
-                else: q_values = self.model.predict(state.reshape(1, -1))
-
+                
                 q_values[0][self.actions.index(action)] = q_update
 
                 X.append(state)
                 targets.append(q_values[0])
 
         self.model.partial_fit(X, targets)
+        
         self.is_init = False
 
     ################# (3) Store learned model: #################
@@ -242,36 +255,36 @@ def reward_from_events(self, events: List[str]) -> int:
     survive_step = 0.15
     game_rewards = {
         # my Events:
-        SURVIVED_STEP:  survive_step,
-        DIED_DIRECT_NEXT_TO_BOMB: -2*survive_step,
-        ALREADY_KNOW_FIELD: -0.1,
-        CLOSER_TO_COIN: 0.2,
-        AWAY_FROM_COIN: -0.25,
-        BACK_AND_FORTH: -0.5,
+        SURVIVED_STEP:               survive_step,
+        DIED_DIRECT_NEXT_TO_BOMB:   -2*survive_step,
+        ALREADY_KNOW_FIELD:         -0.1,
+        CLOSER_TO_COIN:              0.2,
+        AWAY_FROM_COIN:             -0.25,
+        BACK_AND_FORTH:             -0.5,
         
         # AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         # 2*AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         
-        e.MOVED_LEFT:  0,
-        e.MOVED_RIGHT: 0,
-        e.MOVED_UP:    0,
-        e.MOVED_DOWN:  0,
-        e.WAITED:      0,  # could punish for waiting
-        e.INVALID_ACTION: -survive_step,
+        e.MOVED_LEFT:               0,
+        e.MOVED_RIGHT:              0,
+        e.MOVED_UP:                 0,
+        e.MOVED_DOWN:               0,
+        e.WAITED:                   0,
+        e.INVALID_ACTION:           -0.5,
         
-        e.BOMB_DROPPED:     -0.1,
-        e.BOMB_EXPLODED:       0,
+        e.BOMB_DROPPED:             0,
+        e.BOMB_EXPLODED:            0,
 
-        e.CRATE_DESTROYED:      1,
-        e.COIN_FOUND:           1,
-        e.COIN_COLLECTED:      20,
+        e.CRATE_DESTROYED:          1,
+        e.COIN_FOUND:               1,
+        e.COIN_COLLECTED:           5,
 
-        e.KILLED_OPPONENT:      0,
-        e.KILLED_SELF: -6* survive_step,   # maybe include later that distance to bomb is included in penalty 
+        e.KILLED_OPPONENT:          5,
+        e.KILLED_SELF:              -10,   # maybe include later that distance to bomb is included in penalty 
 
-        e.GOT_KILLED: 0,
-        e.OPPONENT_ELIMINATED: 0,
-        e.SURVIVED_ROUND: survive_step,
+        e.GOT_KILLED:               -5,
+        e.OPPONENT_ELIMINATED:      0,
+        e.SURVIVED_ROUND:           survive_step,
     }
     
     reward_sum = 0
