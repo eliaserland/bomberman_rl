@@ -12,27 +12,27 @@ from .callbacks import state_to_features
 
 # This is only an example!
 Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
-
+                        ('state', 'action', 'next_state', 'reward')
+                        )
 
 # Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 5000  # keep only ... last transitions
-BATCH_SIZE = 3000
-RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
-EXPLORATION_MAX = 1
-EXPLORATION_MIN = 0.2
-EXPLORATION_DECAY = 0.9995
-#LEARNING_RATE = 0.01  # test 0.05
-GAMMA = 0.90
+TRANSITION_HISTORY_SIZE  = 5000   # keep only ... last transitions
+BATCH_SIZE               = 3000
+RECORD_ENEMY_TRANSITIONS = 1.0    # record enemy transitions with probability ...
+EXPLORATION_MAX          = 1  
+EXPLORATION_MIN          = 0.2
+EXPLORATION_DECAY        = 0.9995
+#LEARNING_RATE           = 0.01  # test 0.05
+GAMMA                    = 0.90
 
 
 # Events
-SURVIVED_STEP = "SURVIVED_STEP"
+SURVIVED_STEP            = "SURVIVED_STEP"
 DIED_DIRECT_NEXT_TO_BOMB = "DIED_DIRECT_NEXT_TO_BOMB"
-ALREADY_KNOW_FIELD = "ALREADY_KNOW_FIELD"
-CLOSER_TO_COIN = "CLOSER_TO_COIN"
-AWAY_FROM_COIN = "AWAY_FROM_COIN"
-BACK_AND_FORTH = "BACK_AND_FORTH"
+ALREADY_KNOW_FIELD       = "ALREADY_KNOW_FIELD"
+CLOSER_TO_COIN           = "CLOSER_TO_COIN"
+AWAY_FROM_COIN           = "AWAY_FROM_COIN"
+BACK_AND_FORTH           = "BACK_AND_FORTH"
 
 
 def setup_training(self):
@@ -45,15 +45,15 @@ def setup_training(self):
     """
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
+    self.transitions        = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
     self.coordinate_history = deque([], 10)  # short term memory of agent position
-    self.epsilon = EXPLORATION_MAX
-    self.is_init = True
+    self.epsilon            = EXPLORATION_MAX
+    self.is_init            = True
     
     # For Training evaluation purposes:
-    self.score_in_round = 0
-    self.number_game = 0
-    self.collected_coins_in_game  = 0
+    self.score_in_round          = 0
+    self.number_game             = 0
+    self.collected_coins_in_game = 0
     
     self.scores = []
     self.games = []

@@ -29,7 +29,7 @@ def setup(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     self.action_size = len(ACTIONS)
-    self.actions = ACTIONS 
+    self.actions = ACTIONS
         
     if self.train:
         self.logger.info("Setting up model from scratch.")
@@ -66,7 +66,7 @@ def act(self, game_state: dict) -> str:
             self.logger.debug("Choosing action purely at random.")
             execute_action = np.random.choice(valid_actions)
         else:
-            # Choose action with maximum Q-value, from subset of valid actions.
+            # Choose action with maximum Q-value from subset of valid actions.
             self.logger.debug("Choosing action from highest Q-value.")
             q_values       = self.model.predict(state_to_features(game_state))[0][mask]    
             execute_action = valid_actions[np.argmax(q_values)]
@@ -75,11 +75,11 @@ def act(self, game_state: dict) -> str:
     else:
         random_prob = 0.81
         if random.random() < random_prob:
-            # Uniformly & randomly picking a action from subset of valid actions.  
+            # Uniformly & randomly picking a action from subset of valid actions.
             self.logger.debug("Choosing action purely at random.")
             execute_action = np.random.choice(valid_actions)
-        else: 
-            # Choose action with maximum Q-value, from subset of valid actions.
+        else:
+            # Choose action with maximum Q-value from subset of valid actions.
             self.logger.debug("Querying model for action.")
             q_values       = self.model.predict(state_to_features(game_state))[0][mask]
             execute_action = valid_actions[np.argmax(q_values)]
@@ -157,7 +157,7 @@ def state_to_features(game_state: dict) -> np.array:
         relative_position_vertical = 1  # between_invalid_vertical
     
     features = np.array([h, v, relative_position_horizontal, relative_position_vertical])
-    # print(features.reshape(-1))
+
     return features.reshape(-1) # Flatten array.
 
 
@@ -198,7 +198,7 @@ def get_valid_action(game_state: dict):
             mask[i] = 1
     
     # Bombing:
-    if (bombs_left > 0) and aggressive_play: 
+    if bombs_left and aggressive_play: 
         valid_actions.append(ACTIONS[-1])
         mask[-1] = 1
     
