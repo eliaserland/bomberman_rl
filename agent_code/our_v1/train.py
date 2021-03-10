@@ -10,6 +10,8 @@ import settings as s
 import events as e
 from .callbacks import state_to_features
 
+from sklearn.decomposition import PCA, KernelPCA
+
 # This is only an example!
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward')
@@ -59,6 +61,8 @@ def setup_training(self):
     self.games            = []
     self.exploration_rate = []
     self.collected_coins  = []
+
+    self.kpca = KernelPCA(n_components=50, n_jobs=-2)
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -195,6 +199,14 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         self.model.partial_fit(X, targets)
         
         self.is_init = False
+
+        # Experimenting with Kernel PCA for feature selection.
+        if self.number_game % 100 == 0:
+            for state, _, _, _ in batch:
+                if state is not None:
+                    
+
+
 
     ################# (3) Store learned model: #################
 

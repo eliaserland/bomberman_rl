@@ -160,6 +160,71 @@ def state_to_features(game_state: dict) -> np.array:
 
     return features.reshape(1,-1) # Generate (1,D) array.
 
+def NEW_state_to_features(game_state: dict) -> np.array:
+    """
+    *This is not a required function, but an idea to structure your code.*
+
+    Converts the game state to the input of your model, i.e.
+    a feature vector.
+
+    You can find out about the state of the game environment via game_state,
+    which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
+    what it contains.
+
+    :param game_state:  A dictionary describing the current game board.
+    :return: np.array
+    """
+    # This is the dict before the game begins and after it ends
+    if game_state is None:
+        return None
+    
+    # Gather information about the game state
+    arena    = game_state['field']
+    _, score, bombs_left, (x, y) = game_state['self']
+    bombs    = game_state['bombs']
+    bomb_xys = [xy for (xy, t) in bombs]
+    others   = [xy for (n, s, b, xy) in game_state['others']]
+    coins    = game_state['coins']
+    bomb_map = game_state['explosion_map']    
+    
+    
+    features = np.array([h, v, relative_position_horizontal, relative_position_vertical])
+
+    return features.reshape(1,-1) # Generate (1,D) array.
+
+
+def state_to_vect(game_state: dict) -> np.array:
+    """
+    Convert game state dictionary to 
+    """
+    # Flat array of base arena.
+    arena = game_state['field'].flatten()
+
+    # Flat array with info of own agent.
+    _, _, bombs_left, (x, y) = game_state['self']
+    self_info = np.array([int(bombs_left), x, y])
+
+
+    bombs    = game_state['bombs']
+    bomb_xys = [xy for (xy, t) in bombs]
+
+
+    # Flat array with postions of other agents.
+    others   = [xy for (n, s, b, xy) in game_state['others']].flatten()
+
+    
+    coins    = game_state['coins']
+    
+    # Flat explosion map.
+    bomb_map = game_state['explosion_map'].flatten()
+
+
+
+
+    return arena
+
+
+
 
 
 def get_valid_action(game_state: dict):
