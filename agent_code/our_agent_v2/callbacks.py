@@ -40,7 +40,7 @@ def setup(self):
     else:
         self.logger.info("Loading model from saved state.")
         #self.q_table = np.load("my-q-table_agentv12_1coin.npy")
-        with open("my-q-learning_Mulit_SGD_agentv12.pt", "rb") as file:
+        with open("my-q-learning_Mulit_SGD_agentv13_with_bombs.pt", "rb") as file:
             self.model = pickle.load(file)
 
 
@@ -73,7 +73,8 @@ def act(self, game_state: dict) -> str:
 
     ########### (3) When in Game mode: #############
     else:
-        random_prob = 0.1
+        
+        random_prob = 0.01
         if random.random() < random_prob:
             # Uniformly & randomly picking a action from subset of valid actions.
             self.logger.debug("Choosing action purely at random.")
@@ -122,7 +123,7 @@ def state_to_features(game_state: dict) -> np.array:
     max_distance_x = s.ROWS - 2 #s.ROWS - 3 ? 
     max_distance_y = s.COLS - 2
 
-    # (1) get relative,normlaized step distances to closest coin
+    # (1) get relative, normlaized step distances to closest coin
     coins_info = []
     for coin in coins:
         x_coin_dis = coin[0] - x
@@ -156,7 +157,42 @@ def state_to_features(game_state: dict) -> np.array:
     if 'UP' not in valid_actions and 'DOWN' not in valid_actions:
         relative_position_vertical = 1  # between_invalide_vertical
     
-    features = np.array([h , v , relative_position_horizintal , relative_position_vertical])
+    # (3) get relative, normalized step distance to closest bomb 
+    bombs_info = []
+    
+    if len(bombs) == 0:
+        bomb_h = 0   #what to give if no bomb - should be fixed by incountering if in dead zone
+        bomb_v = 0
+        
+    else:
+        for bomb in bombs:
+            x_bomb_dis = bomb[0][0] - x
+            y_bomb_dis = bomb[0][1] - y
+            total_step_distance = abs(x_bomb_dis) + abs(y_bomb_dis)
+            bomb_info = (x_bomb_dis , y_bomb_dis , total_step_distance)
+            bombs_info.append(bomb_info)
+            
+        closest_bomb_info = sorted(bombs_info, key=itemgetter(2))[0]
+
+        if closest_bomb_info[2] == 0:
+            bomb_h = 0
+            bomb_v = 0
+        else:
+            bomb_h = closest_bomb_info[0]/closest_bomb_info[2]  #normalize with total difference to coin   
+            bomb_v = closest_bomb_info[1]/closest_bomb_info[2]  
+
+     # (4) get info if agent is in dead zone or not:
+    bomb_map = np.ones(arena.shape) * 5
+    for (xb, yb), t in bombs:
+        for (i, j) in [(xb + h, yb) for h in range(-3, 4)] + [(xb, yb + h) for h in range(-3, 4)]:
+            if (0 < i < bomb_map.shape[0]) and (0 < j < bomb_map.shape[1]):
+                bomb_map[i, j] = min(bomb_map[i, j], t)
+
+    if bomb_map[x,y] != 5:
+        dead_zone = 1
+    else: dead_zone = 0
+    
+    features = np.array([h , v , relative_position_horizintal , relative_position_vertical, bomb_h , bomb_v , dead_zone])
     # print(features.reshape(-1))
     return features.reshape(-1)
 

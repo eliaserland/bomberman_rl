@@ -177,7 +177,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                         old_value = q_values[0][self.actions.index(action)]
                         q_update = (1 - LEARNING_RATE) * old_value + LEARNING_RATE * (reward + GAMMA *  maximal_response)          # update rule       
 
-                q_values[0][self.actions.index(action)] = q_update
+                q_values[0][self.actions.index(action)] = q_update #need to add '- q_values[0][self.actions.index(action)]'? 
 
                 X.append(state)
                 targets.append(q_values[0])
@@ -187,7 +187,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     ################# (3) Store learned model: #################
 
-    with open("my-q-learning_Mulit_SGD_agentv12.pt", "wb") as file:
+    with open("my-q-learning_Mulit_SGD_agentv13_with_bombs.pt", "wb") as file:
         pickle.dump(self.model, file)
     
     ################# (4) For evaluation purposes: #################
@@ -230,7 +230,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         plt.ylabel('Exploration rate $\epsilon$')
         plt.xlabel("game")
         plt.plot(self.games, self.exploration_rate)
-        plt.savefig('TrainingEvaluation_Mulit_SGD_agentv12.png') 
+        plt.savefig('TrainingEvaluation_Mulit_SGD_agentv13_with_bombs.png') 
         
     
 
@@ -261,7 +261,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.WAITED: 0,  # could punish for waiting
         e.INVALID_ACTION: -survive_step,
         
-        e.BOMB_DROPPED: -0.1,
+        e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
 
         e.CRATE_DESTROYED: 1,
@@ -269,7 +269,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 20,
 
         e.KILLED_OPPONENT: 0,
-        e.KILLED_SELF: -6* survive_step,   # maybe include later that distance to bomb is included in penatly 
+        e.KILLED_SELF: -10* survive_step,   # maybe include later that distance to bomb is included in penatly 
 
         e.GOT_KILLED: 0,
         e.OPPONENT_ELIMINATED: 0,
@@ -289,14 +289,18 @@ def closets_coin_distance(game_state: dict) -> int:
     return the relative total distance from the 
     agent to the closest Coin to check where Agent got closer to Coin.
     '''
+    try:
+        _, score, bombs_left, (x, y) = game_state['self']
+        coins = game_state['coins']
+        coins_dis = []
+        for coin in coins:
+            total_step_distance = abs(coin[0]-x) + abs(coin[1]-y)
+            coin_dis = (total_step_distance)
+            coins_dis.append(coin_dis)
+        closest_coin_dis = sorted(coins_dis)[0]
+        return closest_coin_dis 
     
-    _, score, bombs_left, (x, y) = game_state['self']
-    coins = game_state['coins']
-    coins_dis = []
-    for coin in coins:
-        total_step_distance = abs(coin[0]-x) + abs(coin[1]-y)
-        coin_dis = (total_step_distance)
-        coins_dis.append(coin_dis)
-    closest_coin_dis = sorted(coins_dis)[0]
-    
-    return closest_coin_dis 
+    except:
+        closest_coin_dis = 9
+        return closest_coin_dis 
+        
