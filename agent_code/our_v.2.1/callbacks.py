@@ -53,43 +53,38 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    
+
     ########### (1) only allow valid actions: #############
     mask, valid_actions, p =  get_valid_action(game_state)
-    
+
     ########### (2) When in Training mode: #############
     # todo Exploration vs exploitation: take a decaying exploration rate
     if self.train:
-        random_prob = self.epsilon 
+        random_prob = self.epsilon
         if random.random() < random_prob or self.is_init:
+            # Uniformly & randomly picking a action from subset of valid actions.
             self.logger.debug("Choosing action purely at random.")
             execute_action = np.random.choice(valid_actions)
-            #print(valid_actions, execute_action , p)
-            return execute_action
         else:
-            self.logger.debug("Choosing action from highes q_value.")
-            
-            # choose only from q_values which are valid actions: 
-            q_values = self.model.predict(state_to_features(game_state).reshape(1, -1))[0][mask]
+            # Choose action with maximum Q-value, from subset of valid actions.
+            self.logger.debug("Choosing action from highest Q-value.")
+            q_values       = self.model.predict(state_to_features(game_state))[0][mask]    
             execute_action = valid_actions[np.argmax(q_values)]
-            return execute_action
-
+        
     ########### (3) When in Game mode: #############
     else:
-        
         random_prob = 0.81
         if random.random() < random_prob:
+            # Uniformly & randomly picking a action from subset of valid actions.  
             self.logger.debug("Choosing action purely at random.")
             execute_action = np.random.choice(valid_actions)
-            #print(valid_actions, execute_action , p)
-            return execute_action
+        else: 
+            # Choose action with maximum Q-value, from subset of valid actions.
+            self.logger.debug("Querying model for action.")
+            q_values       = self.model.predict(state_to_features(game_state))[0][mask]
+            execute_action = valid_actions[np.argmax(q_values)]
         
-        # choose only from q_values which are valid actions: 
-        q_values = self.model.predict(state_to_features(game_state).reshape(1, -1))[0][mask]
-        #print(q_values, state_to_features(game_state))
-        execute_action = valid_actions[np.argmax(q_values)]
-        self.logger.debug("Querying model for action.")
-        return execute_action
+    return execute_action
 
 
 def state_to_features(game_state: dict) -> np.array:
@@ -116,18 +111,18 @@ def state_to_features(game_state: dict) -> np.array:
     # e.g agent position (x,y) = (1,1) and closest coin position (15,15) -> distance (14 , 14) state number 4 = 23 
     
     # Gather information about the game state
-    arena = game_state['field']
+    arena    = game_state['field']
     _, score, bombs_left, (x, y) = game_state['self']
-    bombs = game_state['bombs']
+    bombs    = game_state['bombs']
     bomb_xys = [xy for (xy, t) in bombs]
-    others = [xy for (n, s, b, xy) in game_state['others']]
-    coins = game_state['coins']
+    others   = [xy for (n, s, b, xy) in game_state['others']]
+    coins    = game_state['coins']
     bomb_map = game_state['explosion_map']    
     
     max_distance_x = s.ROWS - 2 #s.ROWS - 3 ? 
     max_distance_y = s.COLS - 2
 
-    # (1) get relative,normlaized step distances to closest coin
+    # (1) get relative, normalized step distances to closest coin
     coins_info = []
     for coin in coins:
         x_coin_dis = coin[0] - x
@@ -152,18 +147,19 @@ def state_to_features(game_state: dict) -> np.array:
     # will increase number of states with a factor 3
     mask, valid_actions, p =  get_valid_action(game_state)
     
-    relative_position_vertical = 0
-    relative_position_horizintal = 0
+    relative_position_vertical   = 0
+    relative_position_horizontal = 0
     
     if 'RIGHT' not in valid_actions and 'LEFT' not in valid_actions:
-        relative_position_horizintal = 1  # between_invalid_horizintal
+        relative_position_horizontal = 1  # between_invalid_horizintal
     
     if 'UP' not in valid_actions and 'DOWN' not in valid_actions:
         relative_position_vertical = 1  # between_invalid_vertical
     
-    features = np.array([h , v , relative_position_horizintal , relative_position_vertical])
+    features = np.array([h, v, relative_position_horizontal, relative_position_vertical])
     # print(features.reshape(-1))
-    return features.reshape(-1)
+    return features.reshape(-1) # Flatten array.
+
 
 
 def get_valid_action(game_state: dict):
