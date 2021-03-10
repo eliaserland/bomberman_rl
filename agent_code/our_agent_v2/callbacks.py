@@ -74,7 +74,7 @@ def act(self, game_state: dict) -> str:
     ########### (3) When in Game mode: #############
     else:
         
-        random_prob = 0.01
+        random_prob = 0.05
         if random.random() < random_prob:
             # Uniformly & randomly picking a action from subset of valid actions.
             self.logger.debug("Choosing action purely at random.")
@@ -124,22 +124,26 @@ def state_to_features(game_state: dict) -> np.array:
     max_distance_y = s.COLS - 2
 
     # (1) get relative, normlaized step distances to closest coin
-    coins_info = []
-    for coin in coins:
-        x_coin_dis = coin[0] - x
-        y_coin_dis = coin[1] - y
-        total_step_distance = abs(x_coin_dis) + abs(y_coin_dis)
-        coin_info = (x_coin_dis , y_coin_dis , total_step_distance)
-        coins_info.append(coin_info)
-
-    closest_coin_info = sorted(coins_info, key=itemgetter(2))[0]
-    #print(closest_coin_info)
-    if closest_coin_info[2] == 0:
-        h = 0
+    if len(coins) == 0:
+        h = 0   # what to give if no coins left
         v = 0
-    else:
-        h = closest_coin_info[0]/closest_coin_info[2]  #normalize with total difference to coin   
-        v = closest_coin_info[1]/closest_coin_info[2]  
+    else: 
+        coins_info = []
+        for coin in coins:
+            x_coin_dis = coin[0] - x
+            y_coin_dis = coin[1] - y
+            total_step_distance = abs(x_coin_dis) + abs(y_coin_dis)
+            coin_info = (x_coin_dis , y_coin_dis , total_step_distance)
+            coins_info.append(coin_info)
+
+        closest_coin_info = sorted(coins_info, key=itemgetter(2))[0]
+        #print(closest_coin_info)
+        if closest_coin_info[2] == 0:
+            h = 0
+            v = 0
+        else:
+            h = closest_coin_info[0]/closest_coin_info[2]  #normalize with total difference to coin   
+            v = closest_coin_info[1]/closest_coin_info[2]  
 
     # (2) encounter for relative postion of agent in arena: 
     # is between two invalide field horizontal (not L and R, do U and D)
@@ -157,19 +161,21 @@ def state_to_features(game_state: dict) -> np.array:
     if 'UP' not in valid_actions and 'DOWN' not in valid_actions:
         relative_position_vertical = 1  # between_invalide_vertical
     
-    # (3) get relative, normalized step distance to closest bomb 
+    # (3) get relative, normalized step distance to closest bomb and its timer
     bombs_info = []
     
     if len(bombs) == 0:
         bomb_h = 0   #what to give if no bomb - should be fixed by incountering if in dead zone
         bomb_v = 0
+        bomb_timer = 0
         
     else:
         for bomb in bombs:
             x_bomb_dis = bomb[0][0] - x
             y_bomb_dis = bomb[0][1] - y
+            timer = bomb[1]
             total_step_distance = abs(x_bomb_dis) + abs(y_bomb_dis)
-            bomb_info = (x_bomb_dis , y_bomb_dis , total_step_distance)
+            bomb_info = (x_bomb_dis , y_bomb_dis , total_step_distance, timer)
             bombs_info.append(bomb_info)
             
         closest_bomb_info = sorted(bombs_info, key=itemgetter(2))[0]
@@ -177,9 +183,11 @@ def state_to_features(game_state: dict) -> np.array:
         if closest_bomb_info[2] == 0:
             bomb_h = 0
             bomb_v = 0
+            bomb_timer = 0
         else:
-            bomb_h = closest_bomb_info[0]/closest_bomb_info[2]  #normalize with total difference to coin   
+            bomb_h = closest_bomb_info[0]/closest_bomb_info[2]  #normalize with total difference to bomb   
             bomb_v = closest_bomb_info[1]/closest_bomb_info[2]  
+            bomb_timer = closest_bomb_info[3]
 
      # (4) get info if agent is in dead zone or not:
     bomb_map = np.ones(arena.shape) * 5
@@ -191,8 +199,8 @@ def state_to_features(game_state: dict) -> np.array:
     if bomb_map[x,y] != 5:
         dead_zone = 1
     else: dead_zone = 0
-    
-    features = np.array([h , v , relative_position_horizintal , relative_position_vertical, bomb_h , bomb_v , dead_zone])
+
+    features = np.array([h , v , relative_position_horizintal , relative_position_vertical, bomb_h , bomb_v , bomb_timer, dead_zone])
     # print(features.reshape(-1))
     return features.reshape(-1)
 
