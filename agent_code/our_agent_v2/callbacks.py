@@ -35,12 +35,12 @@ def setup(self):
         self.logger.info("Setting up model from scratch.")
         #self.q_table = np.zeros((3*4*((s.COLS-2)*(s.ROWS-2)), self.action_size))   #initi a q_table which has as many states as possible distances to coin possible
         #self.q_table = np.load("my-q-table_increase_featurespace-alpha=0.01.npy")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0005))
         
     else:
         self.logger.info("Loading model from saved state.")
         #self.q_table = np.load("my-q-table_agentv12_1coin.npy")
-        with open("my-q-learning_Mulit_SGD_agentv13_with_bombs.pt", "rb") as file:
+        with open("my-q-learning_Mulit_SGD_agentv21_with_crates.pt", "rb") as file:
             self.model = pickle.load(file)
 
 
@@ -118,7 +118,9 @@ def state_to_features(game_state: dict) -> np.array:
     bomb_xys = [xy for (xy, t) in bombs]
     others = [xy for (n, s, b, xy) in game_state['others']]
     coins = game_state['coins']
-    bomb_map = game_state['explosion_map']    
+    bomb_map = game_state['explosion_map']  #is weirdly implemented: Does not stop when wall is in betweeen?
+    
+    print("The bomb map is - given \n " , game_state['explosion_map'])
     
     max_distance_x = s.ROWS - 2 #s.ROWS - 3 ? 
     max_distance_y = s.COLS - 2
@@ -145,7 +147,7 @@ def state_to_features(game_state: dict) -> np.array:
             h = closest_coin_info[0]/closest_coin_info[2]  #normalize with total difference to coin   
             v = closest_coin_info[1]/closest_coin_info[2]  
 
-    # (2) encounter for relative postion of agent in arena: 
+    # (2) encounter for relative postion of agent in arena:  + (later added) is in corner
     # is between two invalide field horizontal (not L and R, do U and D)
     # is between two invalide field vertical (do L and R, not U and D)
     # somewhere else (not L and R, not U and D)
@@ -154,13 +156,18 @@ def state_to_features(game_state: dict) -> np.array:
     
     relative_position_vertical = 0
     relative_position_horizintal = 0
+    is_in_corner = 0
     
     if 'RIGHT' not in valid_actions and 'LEFT' not in valid_actions:
         relative_position_horizintal = 1  # between_invalide_horizintal
     
     if 'UP' not in valid_actions and 'DOWN' not in valid_actions:
         relative_position_vertical = 1  # between_invalide_vertical
-    
+        
+    if 'UP' not in VALIDE_ACTIONS or 'DOWN' not in VALIDE_ACTIONS:
+        if 'RIGHT' not in VALIDE_ACTIONS or 'LEFT' not in VALIDE_ACTIONS:
+            is_in_corner = 1  # between_invalide_vertical
+        
     # (3) get relative, normalized step distance to closest bomb and its timer
     bombs_info = []
     
@@ -189,19 +196,32 @@ def state_to_features(game_state: dict) -> np.array:
             bomb_v = closest_bomb_info[1]/closest_bomb_info[2]  
             bomb_timer = closest_bomb_info[3]
 
-     # (4) get info if agent is in dead zone or not:
-    bomb_map = np.ones(arena.shape) * 5
-    for (xb, yb), t in bombs:
-        for (i, j) in [(xb + h, yb) for h in range(-3, 4)] + [(xb, yb + h) for h in range(-3, 4)]:
-            if (0 < i < bomb_map.shape[0]) and (0 < j < bomb_map.shape[1]):
-                bomb_map[i, j] = min(bomb_map[i, j], t)
+     # (4) get info if agent is in dead zone or not: 
+    bomb_map = np.zeros_like(arena)
+    for bomb_xy in bomb_xys:
+        bomb_map += get_explosion_map(arena,bomb_xy)
 
-    if bomb_map[x,y] != 5:
-        dead_zone = 1
+    if bomb_map[x,y] != 0:
+        dead_zone = bomb_map[x,y]
     else: dead_zone = 0
 
-    features = np.array([h , v , relative_position_horizintal , relative_position_vertical, bomb_h , bomb_v , bomb_timer, dead_zone])
-    # print(features.reshape(-1))
+    # (5) get number of crates in explosion radius:
+    
+    explosion_rad = get_explosion_map(arena,(x,y))
+   
+    n_crates_in_explosion_rad = np.count_nonzero((arena[explosion_rad == 1] == 1))
+    
+    # (6) to do: need to add surrounding crates position
+    
+    # (7) add how far from danger zone
+    
+    
+    # (last) stack all featres together
+    features = np.array([h , v , relative_position_horizintal , relative_position_vertical, is_in_corner , bomb_h , bomb_v , bomb_timer, dead_zone, n_crates_in_explosion_rad])
+    
+    print("The bomb map is - mine \n " , bomb_map)
+    #print(features.reshape(-1))
+    
     return features.reshape(-1)
 
 
@@ -256,3 +276,31 @@ def get_valid_action(game_state: dict):
     p = np.random.dirichlet(np.ones(len(valid_actions)), size=1)[0] 
     
     return mask, valid_actions, p
+
+def get_explosion_map(arena, position):
+        x, y = position
+        blast_coords = [(x, y)]
+        power = s.BOMB_POWER 
+
+        for i in range(1, power + 1):
+            if arena[x + i, y] == -1:
+                break
+            blast_coords.append((x + i, y))
+        for i in range(1, power + 1):
+            if arena[x - i, y] == -1:
+                break
+            blast_coords.append((x - i, y))
+        for i in range(1, power + 1):
+            if arena[x, y + i] == -1:
+                break
+            blast_coords.append((x, y + i))
+        for i in range(1, power + 1):
+            if arena[x, y - i] == -1:
+                break
+            blast_coords.append((x, y - i))
+        explosion_map = np.zeros_like(arena)
+        for blast_coord in blast_coords:
+            explosion_map[blast_coord] = 1
+            
+        return explosion_map
+    
