@@ -40,7 +40,7 @@ def setup(self):
     else:
         self.logger.info("Loading model from saved state.")
         #self.q_table = np.load("my-q-table_agentv12_1coin.npy")
-        with open("my-q-learning_Mulit_SGD_agentv12.pt", "rb") as file:
+        with open("my-q-learning_Mulit_SGD_agentv14_n-step_TD.pt", "rb") as file:
             self.model = pickle.load(file)
 
 

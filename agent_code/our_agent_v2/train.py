@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import settings as s
 import events as e
 from .callbacks import state_to_features
+import warnings
+
+warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning) 
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -22,8 +25,9 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 EXPLORATION_MAX = 1
 EXPLORATION_MIN = 0.2
 EXPLORATION_DECAY = 0.9995
-LEARNING_RATE = 0.1  # test 0.5
+LEARNING_RATE = 1  # test 0.5
 GAMMA = 0.90
+N_STEP_TD = 20
 
 
 # Events
@@ -45,9 +49,14 @@ def setup_training(self):
     """
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
-    self.coordinate_history = deque([], 10)  # short term memory of agent position
+    self.transitions = deque(maxlen=10) # long term memory of complete step
+    self.X = deque(maxlen=TRANSITION_HISTORY_SIZE)
+    self.targets = deque(maxlen=TRANSITION_HISTORY_SIZE)
+    self.coordinate_history = deque([], 10)      # short term memory of agent position
+    self.reward_history = deque([], N_STEP_TD)   # for n step TD 
+    
     self.epsilon = EXPLORATION_MAX
+    self.n_steps = N_STEP_TD
     self.is_init = True
     
     # For Training evaluation purposes:
@@ -131,6 +140,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # state_to_features is defined in callbacks.py
     self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
     
+    ################## (2) Do q-learning with n step TD: #################
+    
+    q_learning_with_n_step_TD(self, n = self.n_steps )
+    
     ################# (3) For evaluation purposes: #################
     self.score_in_round += reward_from_events(self, events)
 
@@ -154,40 +167,19 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     if self.epsilon > EXPLORATION_MIN:
         self.epsilon *= EXPLORATION_DECAY
         
-    ################## (2) Do q-learning with batch: #################
+    ################## (2) Do q-learning with n step TD: #################
     
-    if len(self.transitions) > BATCH_SIZE: 
-        #print('start training')
-        batch = random.sample(self.transitions, BATCH_SIZE)
-        X = []
-        targets = []
-        for state, action, state_next, reward in batch:
-            q_update = LEARNING_RATE * reward
-            if state is not None:
-                
-                if self.is_init: q_values = np.zeros(self.action_size).reshape(1, -1)
+    # q_learning_with_n_step_TD(self, n = self.n_steps )
+    if len(self.X) > BATCH_SIZE:
+        
+        X_batch, y_batch = zip(*random.sample(list(zip(self.X, self.targets)), BATCH_SIZE))
 
-                else: q_values = self.model.predict(state.reshape(1, -1))
-                    
-                if state_next is not None:
-                    if self.is_init:
-                        q_update =  LEARNING_RATE * reward
-                    else:
-                        maximal_response = np.max(self.model.predict(state_next.reshape(1, -1))) 
-                        old_value = q_values[0][self.actions.index(action)]
-                        q_update = (1 - LEARNING_RATE) * old_value + LEARNING_RATE * (reward + GAMMA *  maximal_response)          # update rule       
-
-                q_values[0][self.actions.index(action)] = q_update
-
-                X.append(state)
-                targets.append(q_values[0])
-
-        self.model.partial_fit(X, targets)
+        self.model.partial_fit(X_batch, y_batch)
         self.is_init = False
-
+    
     ################# (3) Store learned model: #################
 
-    with open("my-q-learning_Mulit_SGD_agentv12.pt", "wb") as file:
+    with open("my-q-learning_Mulit_SGD_agentv14_n-step_TD.pt", "wb") as file:
         pickle.dump(self.model, file)
     
     ################# (4) For evaluation purposes: #################
@@ -230,7 +222,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         plt.ylabel('Exploration rate $\epsilon$')
         plt.xlabel("game")
         plt.plot(self.games, self.exploration_rate)
-        plt.savefig('TrainingEvaluation_Mulit_SGD_agentv12.png') 
+        plt.savefig('TrainingEvaluation_Mulit_SGD_agentv14_n-step_TD.png') 
         
     
 
@@ -300,3 +292,43 @@ def closets_coin_distance(game_state: dict) -> int:
     closest_coin_dis = sorted(coins_dis)[0]
     
     return closest_coin_dis 
+
+
+def q_learning_with_n_step_TD(self, n = 20):
+    ''' Do the q learning with a n-step TD,
+    train the model with a random batch of n-step TD rewards and corresponding states
+    '''
+     ################## Do n-step TD q-learning with batch: #################
+    
+    state, action, state_next, reward = self.transitions[-1]
+
+    if state is not None:
+        if state_next is not None:
+
+            # adapt to only o the below if none is not in reward_history, since otherwiese games do overlap....
+
+            self.reward_history.append((reward , state, action, state_next))
+
+            #print("There is no None", list(self.reward_history)[0])
+
+            if self.is_init:
+                y_per_state = np.zeros(self.action_size).reshape(1, -1)
+                y_per_action =  reward
+                
+
+            else:
+                #print(len(list(self.reward_history)) , np.array(self.reward_history)[:,0])
+
+                y_per_state = self.model.predict(state.reshape(1, -1))
+
+                maximal_response = np.max(self.model.predict(state_next.reshape(1, -1))) 
+                n_step_reward = np.sum( ((GAMMA)**np.arange(len(list(self.reward_history)))).dot(np.array(self.reward_history)[:,0]) )
+                y_per_action = n_step_reward + GAMMA**n *  maximal_response
+
+            #print(action)
+            y_per_state[0][self.actions.index(action)] = y_per_action
+
+            self.X.append(state)
+            self.targets.append(y_per_state[0])
+
+       
