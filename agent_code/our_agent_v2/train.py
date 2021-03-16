@@ -368,9 +368,9 @@ def reward_from_events(self, events: List[str]) -> int:
         SURVIVED_STEP:  survive_step,
         DIED_DIRECT_NEXT_TO_BOMB: 0,
         ALREADY_KNOW_FIELD: 0,
-        CLOSER_TO_COIN: 0.0,
-        AWAY_FROM_COIN: 0.0,
-        BACK_AND_FORTH: 0.0,
+        CLOSER_TO_COIN: 0,
+        AWAY_FROM_COIN: 0,
+        BACK_AND_FORTH: 0,
         
         # AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         # 2*AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
@@ -380,7 +380,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_UP: 0,
         e.MOVED_DOWN: 0,
         e.WAITED: 0,  # could punish for waiting
-        e.INVALID_ACTION: -survive_step,
+        e.INVALID_ACTION: -1,
         
         e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
