@@ -15,7 +15,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_agent_v2"         # Base filename of model (excl. extensions).
+FILENAME = "SGD_agent_v3"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'softmax'          # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -59,7 +59,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.01, warm_start=True))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.01, warm_start=True, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -158,9 +158,11 @@ def state_to_vect(game_state: dict) -> np.array:
     bombs[:len(bomb_xys)] = bomb_xys 
 
     # Flat array with postions of other agents.
-    others   = [xy for (n, s, b, xy) in game_state['others']].flatten()
+    others = np.zeros(6)
+    others_xy = np.array([xy for (n, s, b, xy) in game_state['others']]).flatten()
+    others[:len(others_xy)] = others_xy
 
-    coins_xys = game_state['coins'].flatten()
+    coins_xys = np.array(game_state['coins']).flatten()
     coins = np.zeros(18)
     coins[:len(coins_xys)] = coins_xys
     

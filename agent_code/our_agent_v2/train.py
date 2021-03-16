@@ -13,7 +13,7 @@ from sklearn.base import clone
 
 import settings as s
 import events as e
-from .callbacks import transform, fname, FILENAME
+from .callbacks import transform, state_to_vect, fname, FILENAME
 
 # Transition tuple. (s, a, r, s')
 Transition = namedtuple('Transition',
@@ -21,15 +21,15 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 5000 # Keep only ... last transitions
-BATCH_SIZE              = 3000 # Size of batch in TD-learning.
-TRAIN_FREQ              = 10   # Train model every ... game.
+TRANSITION_HISTORY_SIZE = 15000 # Keep only ... last transitions
+BATCH_SIZE              = 5000  # Size of batch in TD-learning.
+TRAIN_FREQ              = 10    # Train model every ... game.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
-DR_EPOCHS         = 5       # Nr. of epochs in mini-batch learning.
-DR_MINIBATCH_SIZE = 5000    # Nr. of states in each mini-batch.
-DR_HISTORY_SIZE   = 15000   # Keep the ... last states for DR learning.
+DR_EPOCHS         = 30      # Nr. of epochs in mini-batch learning.
+DR_MINIBATCH_SIZE = 10000    # Nr. of states in each mini-batch.
+DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 <= epsilon <= 1)
 EXPLORATION_INIT  = 1
@@ -37,8 +37,8 @@ EXPLORATION_MIN   = 0.2
 EXPLORATION_DECAY = 0.9995
 
 # Softmax: (0 <= tau < infty)
-TAU_INIT  = 5
-TAU_MIN   = 1
+TAU_INIT  = 10
+TAU_MIN   = 0.1
 TAU_DECAY = 0.999
 
 # N-step TD Q-learning:
@@ -104,7 +104,7 @@ def setup_training(self):
     # Initialization
     self.score_in_round  = 0
     self.collected_coins = 0
-    self.perform_export  = False 
+    self.perform_export  = False
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -144,7 +144,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if new_game_state:
             closest_coin_info_new = closets_coin_distance(new_game_state)
 
-            if closest_coin_info_new is not None:
+            if closest_coin_info_new is not None and closest_coin_info_old is not None:
                 if (closest_coin_info_old - closest_coin_info_new) < 0:
                     events.append(CLOSER_TO_COIN)
                 else:
@@ -175,7 +175,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     # Store the game state for learning of feature extration function.    
     if old_game_state and not self.dr_override:
-        self.state_history.append(transform(self, old_game_state)[0])
+        self.state_history.append(state_to_vect(old_game_state)[0])
 
     ################# (3) For evaluation purposes: #################
     
@@ -204,7 +204,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     # Store the game state for learning of feature extration function.    
     if last_game_state and not self.dr_override:
-        self.state_history.append(transform(self, last_game_state)[0])
+        self.state_history.append(state_to_vect(last_game_state)[0])
 
     # ---------- (2) Decrease the exploration rate: ----------
     if self.act_strategy == 'eps-greedy':    
@@ -257,12 +257,14 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     # ---------- (5) Improve dimensionality reduction: ----------
     # Learn a new (hopefully improved) model for dimensionality reduction.
-    if self.game_nr % DR_FREQ == 0 and not self.dr_override:
+    if ((self.game_nr % DR_FREQ == 0) and 
+        (len(self.state_history) > DR_MINIBATCH_SIZE) and 
+        (not self.dr_override)):
         
         # Minibatch learning on the collected samples # TODO: Try out sampling with/without replacement.       
         for _ in range(DR_EPOCHS):
             batch = random.sample(self.state_history, DR_MINIBATCH_SIZE)
-            self.dr_model.partial_fit(batch)
+            self.dr_model.partial_fit(np.vstack(batch)) #TODO: Fix this broken POS.
         self.dr_model_is_fitted = True
 
         # Since the feature extraction function is now changed, we need to start
@@ -275,7 +277,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         # Empty lists of transitions, coordinate history and game states.
         self.transitions.clear()
         self.coordinate_history.clear()
-        self.state_history.clear()
+        #self.state_history.clear()
 
         # Reset epsilon/tau to their inital values
         if self.act_strategy == 'eps-greedy':
@@ -360,15 +362,15 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    survive_step = 0.15
+    survive_step = 0.1
     game_rewards = {
         # my Events:
         SURVIVED_STEP:  survive_step,
-        DIED_DIRECT_NEXT_TO_BOMB: -2*survive_step,
-        ALREADY_KNOW_FIELD: -0.1,
-        CLOSER_TO_COIN: 0.2,
-        AWAY_FROM_COIN: -0.25,
-        BACK_AND_FORTH: -0.5,
+        DIED_DIRECT_NEXT_TO_BOMB: 0,
+        ALREADY_KNOW_FIELD: 0,
+        CLOSER_TO_COIN: 0.0,
+        AWAY_FROM_COIN: 0.0,
+        BACK_AND_FORTH: 0.0,
         
         # AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         # 2*AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
@@ -380,17 +382,17 @@ def reward_from_events(self, events: List[str]) -> int:
         e.WAITED: 0,  # could punish for waiting
         e.INVALID_ACTION: -survive_step,
         
-        e.BOMB_DROPPED: -0.1,
+        e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
 
         e.CRATE_DESTROYED: 1,
         e.COIN_FOUND: 1,
-        e.COIN_COLLECTED: 20,
+        e.COIN_COLLECTED: 1,
 
-        e.KILLED_OPPONENT: 0,
-        e.KILLED_SELF: -6* survive_step,   # maybe include later that distance to bomb is included in penatly 
+        e.KILLED_OPPONENT: 5,
+        e.KILLED_SELF: -5,
 
-        e.GOT_KILLED: 0,
+        e.GOT_KILLED: -5,
         e.OPPONENT_ELIMINATED: 0,
         e.SURVIVED_ROUND: survive_step,
     }
