@@ -9,9 +9,11 @@ import matplotlib
 matplotlib.use("Agg") # Non-GUI backend, needed for plotting in non-main thread.
 import matplotlib.pyplot as plt
 
+from sklearn.base import clone
+
 import settings as s
 import events as e
-from .callbacks import transform, fname, FILENAME, DR_BATCH_SIZE
+from .callbacks import transform, fname, FILENAME
 
 # Transition tuple. (s, a, r, s')
 Transition = namedtuple('Transition',
@@ -24,18 +26,19 @@ BATCH_SIZE              = 3000 # Size of batch in TD-learning.
 TRAIN_FREQ              = 10   # Train model every ... game.
 
 # Dimensionality reduction from learning experience.
-IMPROVE_DR = True # Perform repeated feature reduction. 
-DR_FREQ    = 1000 # Play ... games between each feature reduction.
-DR_HISTORY_SIZE = 10 * DR_BATCH_SIZE
+DR_FREQ           = 1000    # Play ... games before we fit DR.
+DR_EPOCHS         = 5       # Nr. of epochs in mini-batch learning.
+DR_MINIBATCH_SIZE = 5000    # Nr. of states in each mini-batch.
+DR_HISTORY_SIZE   = 15000   # Keep the ... last states for DR learning.
 
-# Epsilon-Greedy:
+# Epsilon-Greedy: (0 <= epsilon <= 1)
 EXPLORATION_INIT  = 1
 EXPLORATION_MIN   = 0.2
 EXPLORATION_DECAY = 0.9995
 
-# Softmax:
-TAU_INIT  = 10
-TAU_MIN   = 0
+# Softmax: (0 <= tau < infty)
+TAU_INIT  = 5
+TAU_MIN   = 1
 TAU_DECAY = 0.999
 
 # N-step TD Q-learning:
@@ -46,7 +49,7 @@ N_STEPS = 1    # Number of steps to consider real, observed rewards. # TODO: Imp
 PLOT_FREQ = 100
 # -----------------------------------------------------------------------------
 
-# File name for storage of historical record.
+# File name of historical training record used for plotting.
 FNAME_DATA = f"{FILENAME}_data.pt"
 
 # Custom events:
@@ -69,8 +72,9 @@ def setup_training(self):
     self.transitions        = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
     self.coordinate_history = deque([], 10)                         # short term memory of agent position
     
-    # TODO: Storage of states for feature extration function learning.
-    self.state_history = deque(maxlen=DR_HISTORY_SIZE)
+    # Storage of states for feature extration function learning.
+    if not self.dr_override:
+        self.state_history = deque(maxlen=DR_HISTORY_SIZE)
 
     # Set inital epsilon/tau.
     if self.act_strategy == 'eps-greedy':
@@ -95,11 +99,12 @@ def setup_training(self):
             'exploration' : [], # subplot 3
             'games' : []        # subplot 1,2,3 x-axis
         }
-        self.game_nr = 0
+        self.game_nr = 1
 
     # Initialization
     self.score_in_round  = 0
     self.collected_coins = 0
+    self.perform_export  = False 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -167,10 +172,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     ################## (2) Store Transision: #################
     
     self.transitions.append(Transition(transform(self, old_game_state), self_action, transform(self, new_game_state), reward_from_events(self, events)))
-    
-    if old_game_state:
-        pass
-        # TODO: Store the game state for feature extration function learning.
+
+    # Store the game state for learning of feature extration function.    
+    if old_game_state and not self.dr_override:
+        self.state_history.append(transform(self, old_game_state)[0])
 
     ################# (3) For evaluation purposes: #################
     
@@ -197,7 +202,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # ---------- (1) Store last transition tuple: ----------
     self.transitions.append(Transition(transform(self, last_game_state), last_action, None, reward_from_events(self, events)))
 
-    # TODO: Store last game state for feature extration function learning.
+    # Store the game state for learning of feature extration function.    
+    if last_game_state and not self.dr_override:
+        self.state_history.append(transform(self, last_game_state)[0])
 
     # ---------- (2) Decrease the exploration rate: ----------
     if self.act_strategy == 'eps-greedy':    
@@ -245,37 +252,51 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         self.model.fit(X, targets) #self.model.partial_fit(X, targets)
         self.model_is_fitted = True
 
-        # Store the learned model:
-        with open(fname, "wb") as file:
-            pickle.dump(self.model, file)
+        # Raise flag for export of the learned model.
+        self.perform_export = True
 
     # ---------- (5) Improve dimensionality reduction: ----------
     # Learn a new (hopefully improved) model for dimensionality reduction.
     if self.game_nr % DR_FREQ == 0 and not self.dr_override:
         
-        # Batch learning on the collected samples (Bootstrapping?)
-        
-        # for ... in ...
-        #       get random minibatch
-        #       partial_fit()
-        
-        # Save new model for dimension reduction.
+        # Minibatch learning on the collected samples # TODO: Try out sampling with/without replacement.       
+        for _ in range(DR_EPOCHS):
+            batch = random.sample(self.state_history, DR_MINIBATCH_SIZE)
+            self.dr_model.partial_fit(batch)
+        self.dr_model_is_fitted = True
 
-        # Since the feature extraction function has now changed, we need to 
-        # start the learning process over from scratch.
+        # Since the feature extraction function is now changed, we need to start
+        # the learning process of the Q-value function over from scratch.
 
-        # Discard the old model for the Q-value function.
-
+        # Create a new, but unfitted, Q-value model of the same type as before.
+        self.model = clone(self.model)
         self.model_is_fitted = False
-        self.tx_is_fitted = True
 
-        #inkpca.partial_fit()
+        # Empty lists of transitions, coordinate history and game states.
+        self.transitions.clear()
+        self.coordinate_history.clear()
+        self.state_history.clear()
 
+        # Reset epsilon/tau to their inital values
+        if self.act_strategy == 'eps-greedy':
+            self.epsilon = EXPLORATION_INIT
+        elif self.act_strategy == 'softmax':
+            self.tau = TAU_INIT
 
+        # Raise flag for export of full model.
+        self.perform_export = True
 
-    # ---------- (6) Performance evaluation: ----------
+    # ---------- (6) Model export: ----------
+    # Check if a full model export has been requested.
+    if self.perform_export:
+        export = self.model, self.dr_model
+        with open(fname, "wb") as file:
+            pickle.dump(export, file)
+        self.perform_export = False # Reset export flag
+
+    # ---------- (7) Performance evaluation: ----------
     # Total score in this game.
-    score   = np.sum(self.score_in_round)
+    score = np.sum(self.score_in_round)
    
     # Append results to each specific list.
     self.historic_data['score'].append(score)

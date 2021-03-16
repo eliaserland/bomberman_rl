@@ -15,10 +15,8 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_agent_v1"         # Filename of for model output (excl. extension).
+FILENAME = "SGD_agent_v2"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'softmax'          # Options: 'softmax', 'eps-greedy'
-
-DR_BATCH_SIZE = 1000
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -44,37 +42,30 @@ def setup(self):
     # Assign decision strategy.
     self.act_strategy = ACT_STRATEGY
 
-    # TODO: Load in old DR model.
     # Incremental PCA for dimensionality reduction of game state.
     n_comp = 100
-    self.inkpca = IncrementalPCA(n_components=n_comp, batch_size=DR_BATCH_SIZE) 
-    self.dr_override = True  # if True: Use only manual feature extraction.
-    self.tx_is_fitted = False   # TODO: REDO THIS, ONLY TEMPORARY
+    self.dr_override = False  # if True: Use only manual feature extraction.
 
-    # Setting up the model.
+    # Setting up the full model.
     if os.path.isfile(fname):
         self.logger.info("Loading model from saved state.")
         with open(fname, "rb") as file:
-            self.model = pickle.load(file)
+            self.model, self.dr_model = pickle.load(file)
         self.model_is_fitted = True
-        """
-        if self.tx is not None: 
-            self.tx_is_fitted = True
-        else: 
-            self.tx_is_fitted = False
-        """
+        if self.dr_model is not None:
+            self.dr_model_is_fitted = True
+        else:
+            self.dr_model_is_fitted = False
+
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001, warm_start=True))
-        self.model_is_fitted = False
-        """
-        # TODO: Need additional if statement here?
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.01, warm_start=True))
         if not self.dr_override:
-            self.tx = IncrementalPCA(n_components=n_comp, batch_size=DR_BATCH_SIZE) 
-        else: 
-            self.tx = None
-        self.tx_is_fitted = False 
-        """
+            self.dr_model = IncrementalPCA(n_components=n_comp)
+        else:
+            self.dr_model = None
+        self.model_is_fitted = False
+        self.dr_model_is_fitted = False
     else:
         raise ValueError(f"Could not locate saved model {fname}")
 
@@ -139,9 +130,9 @@ def transform(self, game_state: dict) -> np.array:
     # This is the dict before the game begins and after it ends
     if game_state is None:
         return None
-    if self.tx_is_fitted and not self.dr_override:
+    if self.dr_model_is_fitted and not self.dr_override:
         # Automatic dimensionality reduction.
-        return self.tx.transform(state_to_vect(game_state))
+        return self.dr_model.transform(state_to_vect(game_state))
     else:
         # Hand crafted feature extraction function.
         return state_to_features(game_state)
@@ -151,7 +142,34 @@ def state_to_vect(game_state: dict) -> np.array:
     Converts the game state dictionary to a feature vector. Used
     as pre-proccessing before an automatic feature extraction method.
     """
-    return np.array([]).reshape(1, -1) 
+    # TODO: Redo this function, this is terrible.
+    
+    # Flat array of base arena.
+    arena = game_state['field'].flatten()
+
+    # Flat array with info of own agent.
+    _, _, bombs_left, (x, y) = game_state['self']
+    self_info = np.array([int(bombs_left), x, y])
+
+    # 
+    bombs    = game_state['bombs']
+    bomb_xys = np.array([xy for (xy, t) in bombs]).flatten()
+    bombs = np.zeros(8)
+    bombs[:len(bomb_xys)] = bomb_xys 
+
+    # Flat array with postions of other agents.
+    others   = [xy for (n, s, b, xy) in game_state['others']].flatten()
+
+    coins_xys = game_state['coins'].flatten()
+    coins = np.zeros(18)
+    coins[:len(coins_xys)] = coins_xys
+    
+    # Flat explosion map.
+    bomb_map = game_state['explosion_map'].flatten()
+    
+    out = np.concatenate((arena, self_info, bombs, others, coins, bomb_map), axis=None)
+
+    return out.reshape(1, -1)
 
 def state_to_features(game_state: dict) -> np.array:
     """
