@@ -307,7 +307,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     # ---------- (5) Clean n step transition history: don't compute aggregated reward beyond one game ----------
     
-    self.n_step_transitions = deque([], N_STEPS) 
+    self.n_step_transitions.clear()
 
     # ---------- (6) Performance evaluation: ----------
     # Total score in this game.
