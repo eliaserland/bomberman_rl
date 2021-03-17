@@ -363,8 +363,8 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_DROPPED: -0.1,
         e.BOMB_EXPLODED: 0,
 
-        e.CRATE_DESTROYED: 4,
-        e.COIN_FOUND: 4,
+        e.CRATE_DESTROYED: 5,
+        e.COIN_FOUND: 5,
         e.COIN_COLLECTED: 20,
 
         e.KILLED_OPPONENT: 0,

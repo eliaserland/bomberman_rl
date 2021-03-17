@@ -69,7 +69,7 @@ def setup(self):
         """
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001, warm_start=True))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.00001, warm_start=True))
         self.model_is_fitted = False
         """
         # TODO: Need additional if statement here?
@@ -286,7 +286,18 @@ def state_to_features(game_state: dict) -> np.array:
     (escape_left, escape_right, escape_down, escape_up ) = possible_escape_route(arena, (x,y))
 
 
-# ---------- (7) add how far from danger zone: ---------- 
+# ---------- (7) relativ, normalized distance to midpoint of all crates/ density : ----------
+
+    i, j = np.where(arena == 1)
+    i_rel = i-x
+    j_rel = j-y
+    mid_i = np.mean(i_rel)
+    mid_j = np.mean(j_rel)
+    
+    absolute_distance = abs(mid_i) + abs(mid_j)
+    
+    crates_vec_horizontal = mid_i/absolute_distance
+    crates_vec_vertical = mid_j/absolute_distance
     # don't add, just cannot execute action into bomb zone
     
 
@@ -350,7 +361,7 @@ def get_valid_action(game_state: dict):
     
     # Convert list to numpy array (# TODO Is this neccesary?)
     valid_actions = np.array(valid_actions)
-
+    print(valid_actions, mask)
     return mask, valid_actions
 
 
