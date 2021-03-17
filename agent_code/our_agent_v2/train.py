@@ -73,7 +73,6 @@ def setup_training(self):
     # Ques to store the transition tuples and coordinate history of agent.
     self.transitions        = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
     self.coordinate_history = deque([], 10)                         # short term memory of agent position
-    self.n_step_rewards = deque([], N_STEPS)
     self.n_step_transitions = deque([], N_STEPS)
     
     # TODO: Storage of states for feature extration function learning.
