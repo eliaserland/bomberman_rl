@@ -181,36 +181,43 @@ def state_to_features(game_state: dict) -> np.array:
     # Self info
     _, _, bombs_left, (x, y) = game_state['self']
 
-    #            ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT']
-    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
-    pot = np.zeros(len(directions))
-    
+    #            ['UP', 'RIGHT', 'DOWN', 'LEFT']
+    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
+    pot_crates = np.zeros(len(directions))
+    pot_coins  = np.zeros(len(directions))
+    pot_bombs  = np.zeros(len(directions))
+
     arena = game_state['field']
 
     # ---- Potential-based ----
     # Crates:
-    x_boxes, y_boxes = np.where(arena == 1)
+    x_crates, y_crates = np.where(arena == 1)
     for i, d in enumerate(directions):
-        pot[i] += np.sum(gaussian(x_boxes-d[0], y_boxes-d[1], sigma=3, height=0.25))
+        pot_crates[i] += np.sum(gaussian(x_crates-d[0], y_crates-d[1], sigma=3, height=0.25))
 
     # Coins
     coins = game_state['coins']
     if coins:
         coins = np.array(coins).T
         for i, d in enumerate(directions):
-            pot[i] += np.sum(gaussian(coins[0]-d[0], coins[1]-d[1], sigma=7, height=5)) 
+            pot_coins[i] += np.sum(gaussian(coins[0]-d[0], coins[1]-d[1], sigma=7, height=5)) 
 
     # Bombs
     bombs = game_state['bombs']
     if bombs:
         bombs = np.array([xy for (xy, t) in bombs]).T
         for i, d in enumerate(directions):
-            pot[i] += np.sum(bomb_pot(bombs[0]-d[0], bombs[1]-d[1])) 
+            pot_bombs[i] += np.sum(bomb_pot(bombs[0]-d[0], bombs[1]-d[1])) 
 
-    '''
-    # Set potential zero-level to the agent position.
-    pot = pot/pot[-1]
-    '''
+
+    # TODO: GET GRADIENT ESTIMATES
+    feat_crates = np.zeros(2)
+    feat_coins = np.zeros(2)
+    feat_bombs = np.zeros(2)
+
+    feat_crates = np.array([pot_crates[0]-pot_crates[2], pot_crates[1]-pot_crates[3]])
+    
+    
     # -------------------------
 
     # Number of creates that would get destroyed from this position
