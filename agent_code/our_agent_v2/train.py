@@ -35,11 +35,11 @@ EXPLORATION_DECAY = 0.9995
 
 # Softmax:
 TAU_INIT  = 10
-TAU_MIN   = 0
-TAU_DECAY = 0.999
+TAU_MIN   = 3
+TAU_DECAY = 0.9995
 
 # N-step TD Q-learning:
-GAMMA   = 0.90 # Discount factor.
+GAMMA   = 0.99 # Discount factor.
 N_STEPS = 1    # Number of steps to consider real, observed rewards. # TODO: Implement N-step TD Q-learning.
 
 # Auxilary:
@@ -119,7 +119,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
-
+    
     ################# (1) Add own events to hand out rewards #################
                 
     if old_game_state:
@@ -138,12 +138,13 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         # penalty on going away from coin vs reward for going closer: 
         if new_game_state:
             closest_coin_info_new = closets_coin_distance(new_game_state)
-
-            if closest_coin_info_new is not None:
-                if (closest_coin_info_old - closest_coin_info_new) < 0:
-                    events.append(CLOSER_TO_COIN)
-                else:
-                    events.append(AWAY_FROM_COIN)
+            
+            if closest_coin_info_old is not None:
+                if closest_coin_info_new is not None:
+                    if (closest_coin_info_old - closest_coin_info_new) < 0:
+                        events.append(CLOSER_TO_COIN)
+                    else:
+                        events.append(AWAY_FROM_COIN)
 
         if 'GOT_KILLED' in events:
             # closer to bomb gives higher penalty:
@@ -330,7 +331,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         # Export the figure.
         fig.tight_layout()
         plt.savefig(f'TrainEval_{FILENAME}.pdf') 
-       
+        
 
 def reward_from_events(self, events: List[str]) -> int:
     """
@@ -362,8 +363,8 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_DROPPED: -0.1,
         e.BOMB_EXPLODED: 0,
 
-        e.CRATE_DESTROYED: 1,
-        e.COIN_FOUND: 1,
+        e.CRATE_DESTROYED: 4,
+        e.COIN_FOUND: 4,
         e.COIN_COLLECTED: 20,
 
         e.KILLED_OPPONENT: 0,
