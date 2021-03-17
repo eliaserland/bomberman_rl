@@ -220,7 +220,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     
     if len(self.n_step_transitions) == N_STEPS:
         
-        n_step_reward = np.sum((GAMMA)**np.arange(N_STEPS).dot(np.array(self.n_step_transitions)[:,3]))
+        reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
+        n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
         
         n_step_old_feature_state = self.n_step_transitions[0][0]
         n_step_new_feature_state = self.n_step_transitions[0][2]
