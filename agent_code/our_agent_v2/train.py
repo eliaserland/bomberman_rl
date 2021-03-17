@@ -20,7 +20,6 @@ from .callbacks import transform, fname, FILENAME, DR_BATCH_SIZE
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward', 'n_step_next_state'))
 
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning) 
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
