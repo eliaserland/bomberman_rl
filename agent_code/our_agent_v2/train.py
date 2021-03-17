@@ -13,7 +13,7 @@ from sklearn.base import clone
 
 import settings as s
 import events as e
-from .callbacks import transform, state_to_vect, fname, FILENAME
+from .callbacks import transform, state_to_features, state_to_vect, fname, FILENAME
 
 # Transition tuple. (s, a, r, s')
 Transition = namedtuple('Transition',
@@ -21,8 +21,8 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 15000 # Keep only ... last transitions
-BATCH_SIZE              = 5000  # Size of batch in TD-learning.
+TRANSITION_HISTORY_SIZE = 25000 # Keep only ... last transitions.
+BATCH_SIZE              = 7500  # Size of batch in TD-learning.
 TRAIN_FREQ              = 10    # Train model every ... game.
 
 # Dimensionality reduction from learning experience.
@@ -37,16 +37,16 @@ EXPLORATION_MIN   = 0.2
 EXPLORATION_DECAY = 0.9995
 
 # Softmax: (0 <= tau < infty)
-TAU_INIT  = 10
+TAU_INIT  = 5
 TAU_MIN   = 0.1
-TAU_DECAY = 0.999
+TAU_DECAY = 0.9995
 
 # N-step TD Q-learning:
 GAMMA   = 0.90 # Discount factor.
 N_STEPS = 1    # Number of steps to consider real, observed rewards. # TODO: Implement N-step TD Q-learning.
 
 # Auxilary:
-PLOT_FREQ = 100
+PLOT_FREQ = 25
 # -----------------------------------------------------------------------------
 
 # File name of historical training record used for plotting.
@@ -59,6 +59,9 @@ ALREADY_KNOW_FIELD = "ALREADY_KNOW_FIELD"
 CLOSER_TO_COIN = "CLOSER_TO_COIN"
 AWAY_FROM_COIN = "AWAY_FROM_COIN"
 BACK_AND_FORTH = "BACK_AND_FORTH"
+
+POTENTIAL_UPDATE = "POTENTIAL_UPDATE"
+
 
 def setup_training(self):
     """
@@ -96,14 +99,16 @@ def setup_training(self):
         self.historic_data = {
             'score' : [],       # subplot 1
             'coins' : [],       # subplot 2
-            'exploration' : [], # subplot 3
-            'games' : []        # subplot 1,2,3 x-axis
+            'crates': [],       # subplot 3
+            'exploration' : [], # subplot 4
+            'games' : []        # subplot 1,2,3,4 x-axis
         }
         self.game_nr = 1
 
     # Initialization
-    self.score_in_round  = 0
-    self.collected_coins = 0
+    self.score_in_round   = 0
+    self.collected_coins  = 0
+    self.destroyed_crates = 0
     self.perform_export  = False
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -126,7 +131,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     ################# (1) Add own events to hand out rewards #################
-                
+    
+    self.pot_diff = 0
+
     if old_game_state:
         _, score, bombs_left, (x, y) = old_game_state['self']
         closest_coin_info_old = closets_coin_distance(old_game_state)
@@ -137,10 +144,21 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(ALREADY_KNOW_FIELD)
             if self.coordinate_history.count((x, y)) > 2:
                 events.append(BACK_AND_FORTH)
-
         self.coordinate_history.append((x, y))
 
-        # penalty on going away from coin vs reward for going closer: 
+        if new_game_state:
+
+            # TODO: STORE TRANSITION TUPLE BEFORE THIS SECTION, THEN ACCESS THIS INSTEAD 
+            # OF CALLING STATE_TO_FEATURES MORE TIMES.
+
+            pot_old = state_to_features(old_game_state)[0,-1]
+            pot_new = state_to_features(new_game_state)[0,-1]
+
+            self.pot_diff = pot_new-pot_old
+            events.append(POTENTIAL_UPDATE)
+
+        '''
+        # penalty on going away from coin vs reward for going closer:
         if new_game_state:
             closest_coin_info_new = closets_coin_distance(new_game_state)
 
@@ -149,7 +167,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     events.append(CLOSER_TO_COIN)
                 else:
                     events.append(AWAY_FROM_COIN)
+        '''
 
+        '''
         if 'GOT_KILLED' in events:
             # closer to bomb gives higher penalty:
             bombs = old_game_state['bombs']
@@ -164,6 +184,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
             if step_distance_closest_bomb < 2:
                 events.append(DIED_DIRECT_NEXT_TO_BOMB)
+        '''
 
     # reward for surviving:          
     if not 'GOT_KILLED' in events:
@@ -181,7 +202,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     
     if 'COIN_COLLECTED' in events:
         self.collected_coins += 1
-
+    if 'CRATE_DESTROYED' in events:
+        self.destroyed_crates +=1
     self.score_in_round += reward_from_events(self, events)
 
 
@@ -257,9 +279,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     # ---------- (5) Improve dimensionality reduction: ----------
     # Learn a new (hopefully improved) model for dimensionality reduction.
-    if ((self.game_nr % DR_FREQ == 0) and 
-        (len(self.state_history) > DR_MINIBATCH_SIZE) and 
-        (not self.dr_override)):
+    if ((not self.dr_override) and
+        (self.game_nr % DR_FREQ == 0) and 
+        (len(self.state_history) > DR_MINIBATCH_SIZE)):
         
         # Minibatch learning on the collected samples # TODO: Try out sampling with/without replacement.       
         for _ in range(DR_EPOCHS):
@@ -303,6 +325,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # Append results to each specific list.
     self.historic_data['score'].append(score)
     self.historic_data['coins'].append(self.collected_coins)
+    self.historic_data['crates'].append(self.destroyed_crates)
     self.historic_data['games'].append(self.game_nr)   
     if self.act_strategy == 'eps-greedy':
         self.historic_data['exploration'].append(self.epsilon)
@@ -316,6 +339,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # Reset game score, coins collected and one up the game count.
     self.score_in_round  = 0
     self.collected_coins = 0
+    self.destroyed_crates = 0
     self.game_nr += 1
     
     # Plot training progress every n:th game.
@@ -325,10 +349,11 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         games_list = self.historic_data['games']
         score_list = self.historic_data['score']
         coins_list = self.historic_data['coins']
+        crate_list = self.historic_data['crates']
         explr_list = self.historic_data['exploration']
 
         # Plotting
-        fig, ax = plt.subplots(3, sharex=True)
+        fig, ax = plt.subplots(4, sharex=True)
 
         # Total score per game.
         ax[0].plot(games_list, score_list)
@@ -340,19 +365,25 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         ax[1].set_title('Collected coins per game')
         ax[1].set_ylabel('Coins')
 
+        # Destroyed crates per game.
+        ax[2].plot(games_list, crate_list)
+        ax[2].set_title('Destroyed crates per game')
+        ax[2].set_ylabel('Crates')
+
         # Exploration rate (epsilon/tau) per game.
-        ax[2].plot(games_list, explr_list)
+        ax[3].plot(games_list, explr_list)
         if self.act_strategy == 'eps-greedy':        
-            ax[2].set_title('$\epsilon$-greedy: Exploration rate $\epsilon$')
-            ax[2].set_ylabel('$\epsilon$')
+            ax[3].set_title('$\epsilon$-greedy: Exploration rate $\epsilon$')
+            ax[3].set_ylabel('$\epsilon$')
         elif self.act_strategy == 'softmax':
-            ax[2].set_title('Softmax: Exploration rate $\\tau$')
-            ax[2].set_ylabel('$\\tau$')
-        ax[2].set_xlabel('Game #')
+            ax[3].set_title('Softmax: Exploration rate $\\tau$')
+            ax[3].set_ylabel('$\\tau$')
+        ax[3].set_xlabel('Game #')
 
         # Export the figure.
         fig.tight_layout()
-        plt.savefig(f'TrainEval_{FILENAME}.pdf') 
+        plt.savefig(f'TrainEval_{FILENAME}.pdf')
+        plt.close('all') 
        
 
 def reward_from_events(self, events: List[str]) -> int:
@@ -372,6 +403,8 @@ def reward_from_events(self, events: List[str]) -> int:
         AWAY_FROM_COIN: 0,
         BACK_AND_FORTH: 0,
         
+        POTENTIAL_UPDATE: 0.1*self.pot_diff,
+
         # AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         # 2*AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
         
