@@ -61,6 +61,8 @@ AWAY_FROM_COIN = "AWAY_FROM_COIN"
 BACK_AND_FORTH = "BACK_AND_FORTH"
 
 POTENTIAL_UPDATE = "POTENTIAL_UPDATE"
+ESCAPED_LETHAL = "ESCAPED_LETHAL"
+ENTERED_LETHAL = "ENTERED_LETHAL"
 
 
 def setup_training(self):
@@ -132,9 +134,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     ################# (1) Add own events to hand out rewards #################
     
-    self.pot_diff = 0
+    self.pot_diff = 0 # TODO: Make sense of this.
 
     if old_game_state:
+        """
         _, score, bombs_left, (x, y) = old_game_state['self']
         closest_coin_info_old = closets_coin_distance(old_game_state)
 
@@ -145,17 +148,28 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if self.coordinate_history.count((x, y)) > 2:
                 events.append(BACK_AND_FORTH)
         self.coordinate_history.append((x, y))
+        """
 
+        """
         if new_game_state:
-
-            # TODO: STORE TRANSITION TUPLE BEFORE THIS SECTION, THEN ACCESS THIS INSTEAD 
-            # OF CALLING STATE_TO_FEATURES MORE TIMES.
-
             pot_old = state_to_features(old_game_state)[0,-1]
             pot_new = state_to_features(new_game_state)[0,-1]
 
             self.pot_diff = pot_new-pot_old
             events.append(POTENTIAL_UPDATE)
+        """
+        if new_game_state:
+            state_new = state_to_features(new_game_state)
+            state_old = state_to_features(old_game_state)
+
+            # The agent's lethal status at its position in each game state.
+            lethal_new = state_new[0,9]
+            lethal_old = state_old[0,9]
+            if lethal_new > lethal_old:
+                events.append(ENTERED_LETHAL)
+            elif lethal_old > lethal_new:
+                events.append(ESCAPED_LETHAL)
+
 
         '''
         # penalty on going away from coin vs reward for going closer:
@@ -186,7 +200,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(DIED_DIRECT_NEXT_TO_BOMB)
         '''
 
-    # reward for surviving:          
+    # reward for surviving:
     if not 'GOT_KILLED' in events:
         events.append(SURVIVED_STEP)         
     
@@ -224,7 +238,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # ---------- (1) Store last transition tuple: ----------
     self.transitions.append(Transition(transform(self, last_game_state), last_action, None, reward_from_events(self, events)))
 
-    # Store the game state for learning of feature extration function.    
+    # Store the game state for learning of feature extration function.
     if last_game_state and not self.dr_override:
         self.state_history.append(state_to_vect(last_game_state)[0])
 
@@ -394,6 +408,8 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     survive_step = -0.1
+    lethal_magnitude = 0.5
+
     game_rewards = {
         # my Events:
         SURVIVED_STEP:  survive_step,
@@ -404,15 +420,14 @@ def reward_from_events(self, events: List[str]) -> int:
         BACK_AND_FORTH: 0,
         
         POTENTIAL_UPDATE: 0.1*self.pot_diff,
-
-        # AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
-        # 2*AWAY_FROM_COIN + ALREADY_KNOW_FIELD + survive_step = - (CLOSER_TO_COIN + survive_step) + survive_step
+        ESCAPED_LETHAL: lethal_magnitude,
+        ENTERED_LETHAL: -lethal_magnitude,
         
         e.MOVED_LEFT: 0,
         e.MOVED_RIGHT: 0,
         e.MOVED_UP: 0,
         e.MOVED_DOWN: 0,
-        e.WAITED: 0,  # could punish for waiting
+        e.WAITED: 0,
         e.INVALID_ACTION: -1,
         
         e.BOMB_DROPPED: 0,
