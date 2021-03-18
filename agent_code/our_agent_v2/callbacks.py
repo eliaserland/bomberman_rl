@@ -8,6 +8,7 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import SGDRegressor
 from sklearn.decomposition import KernelPCA
 from sklearn.decomposition import IncrementalPCA
+from queue import Queue
 
 import settings as s
 import events as e
@@ -205,9 +206,9 @@ def state_to_features(game_state: dict) -> np.array:
     # Bombs
     bombs = game_state['bombs']
     if bombs:
-        bombs = np.array([xy for (xy, t) in bombs]).T
+        bomb_arr = np.array([xy for (xy, t) in bombs]).T
         for i, d in enumerate(directions):
-            pot_bombs[i] += np.sum(bomb_pot(bombs[0]-d[0], bombs[1]-d[1])) 
+            pot_bombs[i] += np.sum(bomb_pot(bomb_arr[0]-d[0], bomb_arr[1]-d[1])) 
 
     '''
     # TODO: GET GRADIENT ESTIMATES
@@ -222,6 +223,8 @@ def state_to_features(game_state: dict) -> np.array:
     # -------------------------
 
     # Number of creates that would get destroyed from this position
+
+    # REDO THIS, HAS LOCIGAL ERRORS
     crates = 0
     directions_str = ['UP', 'RIGHT', 'DOWN', 'LEFT']
     for direction in directions_str:
@@ -231,6 +234,9 @@ def state_to_features(game_state: dict) -> np.array:
             crates += 1
             ix, iy = increment_position(ix, iy, direction)
     
+
+    # TODO: Number of crates destructible from position (x,y) destructible_crates()
+
     # Count escape ways for each direction.
     escapable = np.zeros(len(direction))
     for i, direction in enumerate(directions_str):
@@ -247,6 +253,15 @@ def state_to_features(game_state: dict) -> np.array:
                 escapable[i] += 1
             ix, iy = increment_position(ix, iy, direction)
 
+    # TODO: is_escapable()
+
+    # TODO: dir_closest_escape()
+
+    
+
+
+    # TODO: is_lethal()
+
     # Converting scalar features to numpy vectors.
     # Own bomb indicator, and number of crates reachable from this position:
     bombs_crates = np.array([int(bombs_left), crates])
@@ -256,13 +271,19 @@ def state_to_features(game_state: dict) -> np.array:
     return features.reshape(1,-1)
 
 
-def gaussian(x: np.array, y: np.array, sigma: float=1, height: float=1) -> float:
+def gaussian(x: np.array, y: np.array, sigma: float=1, height: float=1) -> np.array:
     return height*np.exp(-0.5*(x**2+y**2)/sigma**2)
 
-def bomb_pot(x: np.array, y: np.array, diag: float=20, height: float=10) -> float:
+def bomb_pot(x: np.array, y: np.array, diag: float=20, height: float=10) -> np.array:
     return height*(np.clip((np.abs(x)+np.abs(y)+diag*np.abs(x*y))/4, None, 1)-1)
 
+def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
+    return height*1/(1+x**2+y**2)
+
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
+    """
+    Check if tile at position (x,y) is of the specified type.
+    """
     if object == 'crate':
         return arena[x,y] == 1
     elif object == 'free':
@@ -273,6 +294,9 @@ def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
         raise ValueError(f"Invalid object {object}")
 
 def increment_position(x: int, y: int, direction: str) -> (int, int):
+    """
+    Standing at position (x,y), take a step in the specified direction.
+    """
     if direction == 'UP':
         y -= 1
     elif direction == 'RIGHT':
@@ -286,6 +310,10 @@ def increment_position(x: int, y: int, direction: str) -> (int, int):
     return x, y
 
 def check_sides(x: int, y: int, direction: str) -> (int, int, int, int):
+    """
+    Standing at position (x,y) and facing the direction specified, get the
+    position indices of the two tiles directly to the sides of (x,y).
+    """
     if direction == 'UP' or direction == 'DOWN':
         jx, jy, kx, ky = x+1, y, x-1, y
     elif direction == 'RIGHT' or direction == 'LEFT':
@@ -293,6 +321,108 @@ def check_sides(x: int, y: int, direction: str) -> (int, int, int, int):
     else:
         raise ValueError(f"Invalid direction {direction}")
     return jx, jy, kx, ky
+
+def is_lethal(x: int, y: int, arena: np.array, bombs: list) -> bool:
+    """
+    Check if position (x,y) is within the lethal range of any of the ticking
+    bombs. Returns True if the position is within blast radius.
+    """
+    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']        
+    if bombs:        
+        bombs_xy = [xy for (xy, t) in bombs]
+        for bx, by in bombs_xy:
+            if bx == x and by == y:
+                return True
+            for direction in directions:
+                ix, iy = bx, by
+                ix, iy = increment_position(ix, iy, direction)
+                while (not has_object(ix, iy, arena, 'wall') and
+                       abs(ix-bx) <= 3 and abs(iy-by) <= 3):
+                    if ix == x and iy == y:
+                        return True
+                    ix, iy = increment_position(ix, iy, direction)
+    return False
+
+def destructible_crates(x: int, y: int, arena: np.array) -> int:
+    """
+    Count the no. of crates that would get destroyed by a bomb placed at (x,y).
+    """
+    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+    crates = 0
+    for direction in directions:
+        ix, iy = x, y
+        ix, iy = increment_position(ix, iy, direction)
+        while (not has_object(ix, iy, arena, 'wall') and
+               abs(x-ix) <= 3 and abs(y-iy) <= 3):
+            if has_object(ix, iy, arena, 'crate'):
+                crates += 1
+            ix, iy = increment_position(ix, iy, direction)
+    return crates
+
+# TODO: is_escapable() needs to consider that another agent might block its way.
+# TODO: is_escapable() should consider effect of other agent's active bombs.
+def is_escapable(x: int, y: int, arena: np.array) -> bool:
+    """
+    Assuming the agent is standing at (x,y), check if an escape from a bomb
+    dropped at its own position is possible (not considering other agents'
+    active bombs). Returns True if an escape from own bomb is possible.
+    """
+    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+    for direction in directions:
+        ix, iy = x, y
+        ix, iy = increment_position(ix, iy, direction)
+        while has_object(ix, iy, arena, 'free'):
+            if abs(x-ix) > 3 or abs(y-iy) > 3:
+                return True
+            jx, jy, kx, ky = check_sides(ix, iy, direction)
+            if (has_object(jx, jy, arena, 'free') or
+                has_object(kx, ky, arena, 'free')):
+                return True
+            ix, iy = increment_position(ix, iy, direction)
+    return False
+
+def get_free_neighbours(x: int, y: int, arena: np.array) -> list:
+    """
+    Get a list the positions of all free tiles neighbouring position (x,y).
+    # TODO: Probably should consider bombs and agents as well.
+    """
+    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
+    neighbours = []
+    for ix, iy in directions:
+        if has_object(ix, iy, arena, 'free'):
+            neighbours.append((ix, iy))
+    return neighbours
+
+
+def escape_dir(x: int, y: int, arena: np.array, bombs: list) -> np.array:
+    """
+    Given agent's position at (x,y) find the direction to the closest non-lethal
+    tile. Returns a normalized vector indicating the direction. Returns the zero
+    vector if the bombs cannot be escaped. # TODO: VERIFY THIS LOGIC.
+    """
+    escapable = False # initialization
+
+    # Breadth-first search for the closest non-lethal position.
+    q = Queue()  # Create a queue. 
+    visited = [] # List to keep track of visited positions.
+    root = (x,y)
+    visited.append(root)
+    q.put(root)
+    while not q.empty():
+        ix, iy = q.get()
+        if not is_lethal(ix, iy, arena, bombs):
+            escapable = True
+            break
+        neighbours = get_free_neighbours(ix, iy, arena)
+        for neighbour in neighbours:
+            if not neighbour in visited:
+                q.put(neighbour)
+    if escapable:
+        rel_pos = (ix-x, iy-y)
+        return rel_pos / np.linalg.norm(rel_pos)
+    else:
+        return np.zeros(2)
+
 
 '''
 def state_to_features(game_state: dict) -> np.array:
