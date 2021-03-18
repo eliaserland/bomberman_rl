@@ -16,8 +16,8 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_pot_v2"         # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'softmax'          # Options: 'softmax', 'eps-greedy'
+FILENAME = "SGD_pot_v6"         # Base filename of model (excl. extensions).
+ACT_STRATEGY = 'softmax'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -200,13 +200,20 @@ def state_to_features(game_state: dict) -> np.array:
     x_crates, y_crates = np.where(arena == 1)
     for i, d in enumerate(directions):
         pot_crates[i] += np.sum(gaussian(x_crates-d[0], y_crates-d[1], sigma=3, height=0.25))
+    """
 
     # Coins
+    """
     if coins:
-        coins = np.array(coins).T
+        coins_arr = np.array(coins).T
         for i, d in enumerate(directions):
-            pot_coins[i] += np.sum(gaussian(coins[0]-d[0], coins[1]-d[1], sigma=7, height=5)) 
+            pot_coins[i] += np.sum(inv_squared(coins_arr[0]-d[0], coins_arr[1]-d[1]))
+    coins_grad = np.zeros(2)
+    [(pot_coins[1]-pot_coins[3]),  (pot_coins[0]-pot_coins[2])]
+    coins_grad = np.array([])
+    """
 
+    """
     # Bombs
     if bombs:
         bomb_arr = np.array(bombs).T
@@ -216,18 +223,21 @@ def state_to_features(game_state: dict) -> np.array:
     # TODO: GET GRADIENT ESTIMATES
     feat_crates = np.zeros(2)
     feat_coins = np.zeros(2)
-    feat_bombs = np.zeros(2)
-
-    feat_crates = np.array([pot_crates[0]-pot_crates[2], pot_crates[1]-pot_crates[3]])
-    pot = pot_bombs + pot_coins + pot_crates
+    feat_bombs = np.zeros(2)crates_direction
     """
     # -------------------------
     # -------------------------
     # -------------------------
     
+    # Normalized vector indicating the direction of the closest coin.
+    coin_dir = closest_coin_dir(x, y, coins)
+
     # No. of creates that would get destroyed by a bomb at the agent's position.
     crates = destructible_crates(x, y, arena)
     # TODO: Features using destructible_crates() for tiles in the agent's immedate surrounding.
+
+    # Find tile within a specified radius which can be reached by agent and destroyes the most crates
+    crates_direction = crates_dir(x, y, 8, arena, bombs, others)
 
     # Agent can escape from a potential bomb placed at its current position.
     escapable = int(is_escapable(x, y, arena))
@@ -240,13 +250,13 @@ def state_to_features(game_state: dict) -> np.array:
     for i, (ix, iy) in enumerate(directions):
         lethal_directions[i] = int(is_lethal(ix, iy, arena, bombs))
     
-    # Converting scalar features to a numpy vector.
-    # Own bomb indicator, and number of crates reachable from this position:
+    # Joining the scalar features into a numpy vector.
     scalar_feat = np.array([int(bombs_left), crates, escapable])
-
-    features = np.concatenate((scalar_feat, escape_direction, lethal_directions), axis=None)
-    # [bombs_left, crates, escapable, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own]
-    # [         0,      1,         2,            3,            4,        5,        6,        7,        8,          9]
+    
+    # Concatenating all vectors into the final feature vector.
+    features = np.concatenate((scalar_feat, escape_direction, lethal_directions, coin_dir, crates_direction), axis=None)
+    # [bombs_left, crates, escapable, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y]
+    # [         0,      1,         2,            3,            4,        5,        6,        7,        8,          9,     10,     11]
 
     return features.reshape(1,-1)
 
@@ -259,6 +269,21 @@ def bomb_pot(x: np.array, y: np.array, diag: float=20, height: float=10) -> np.a
 
 def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
     return height*1/(1+x**2+y**2)
+
+def closest_coin_dir(x: int, y: int, coins: list) -> np.array:    
+    """
+    Given the agent's position at (x,y) get the normalized position vector
+    towards the closest revealed coin.
+    """
+    if coins:
+        l1_dist = []
+        for cx, cy in coins:
+            l1_dist.append(abs(cx-x)+abs(cy-y))
+        cx, cy = coins[np.argmin(l1_dist)]
+        rel_pos = (cx-x, cy-y)
+        if rel_pos == (0, 0):
+            return rel_pos / np.linalg.norm(rel_pos)
+    return np.zeros(2)
 
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
     """
@@ -309,8 +334,7 @@ def is_lethal(x: int, y: int, arena: np.array, bombs: list) -> bool:
     """
     directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']        
     if bombs:        
-        bombs_xy = [xy for (xy, t) in bombs]
-        for bx, by in bombs_xy:
+        for (bx, by) in bombs:
             if bx == x and by == y:
                 return True
             for direction in directions:
@@ -375,7 +399,6 @@ def get_free_neighbours(x: int, y: int, arena: np.array, bombs: list, others: li
             neighbours.append((ix, iy))
     return neighbours
 
-
 def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np.array:
     """
     Given agent's position at (x,y) find the direction to the closest non-lethal
@@ -383,28 +406,71 @@ def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np
     vector if the bombs cannot be escaped or if there are no active bombs.
     """
     escapable = False # initialization
+    if bombs:
+        # Breadth-first search for the closest non-lethal position.
+        q = Queue()  # Create a queue.
+        visited = [] # List to keep track of visited positions.
+        root = (x,y)
+        visited.append(root)
+        q.put(root)
+        while not q.empty():
+            ix, iy = q.get()
+            if not is_lethal(ix, iy, arena, bombs):
+                escapable = True
+                break
+            neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
+            for neighbour in neighbours:
+                if not neighbour in visited:
+                    visited.append(neighbour)
+                    q.put(neighbour)
+        if escapable:
+            rel_pos = (ix-x, iy-y)
+            if not rel_pos == (0, 0):
+                return rel_pos / np.linalg.norm(rel_pos) 
+    return np.zeros(2)
 
-    # Breadth-first search for the closest non-lethal position.
-    q = Queue()  # Create a queue.
-    visited = [] # List to keep track of visited positions.
-    root = (x,y)
-    visited.append(root)
+
+def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: list) -> np.array:
+    """
+    Given the agent's position at (x,y) find the tile within n steps that 
+    would yield the largest amount of destroyed crates if a bomb where to be 
+    placed there. Return a normalized vector indicating the direction to this
+    tile. Return the zero vector if no crates can be found.
+    """
+    q = Queue()
+    crates = []
+    visited = [] 
+    root = ((x,y), 0)
+    visited.append(root[0])
     q.put(root)
     while not q.empty():
-        ix, iy = q.get()
-        if not is_lethal(ix, iy, arena, bombs):
-            escapable = True
-            break
+        (ix, iy), m = q.get()
+        if m > n:
+            continue
+        c = destructible_crates(ix, iy, arena)
+        if c > 0:
+            crates.append((c, (ix, iy)))
         neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
         for neighbour in neighbours:
             if not neighbour in visited:
                 visited.append(neighbour)
-                q.put(neighbour)
-    if escapable:
-        rel_pos = (ix-x, iy-y)
-        return rel_pos / np.linalg.norm(rel_pos)
-    else:
-        return np.zeros(2)
+                q.put((neighbour, m+1))
+    if crates:
+        c_max = 0
+        for c, (ix, iy) in crates:
+            if c > c_max:
+                c_max = c
+                cx, cy = ix, iy
+        rel_pos = (cx-x, cy-y)
+        if not rel_pos == (0, 0):
+            return rel_pos / np.linalg.norm(rel_pos) 
+    return np.zeros(2)
+
+
+
+
+
+
 
 
 '''

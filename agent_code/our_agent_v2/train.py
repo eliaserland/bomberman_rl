@@ -21,9 +21,9 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 25000 # Keep only ... last transitions.
-BATCH_SIZE              = 7500  # Size of batch in TD-learning.
-TRAIN_FREQ              = 10    # Train model every ... game.
+TRANSITION_HISTORY_SIZE = 30000 # Keep only ... last transitions.
+BATCH_SIZE              = 5000  # Size of batch in TD-learning.
+TRAIN_FREQ              = 15    # Train model every ... game.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
@@ -37,16 +37,16 @@ EXPLORATION_MIN   = 0.2
 EXPLORATION_DECAY = 0.9995
 
 # Softmax: (0 <= tau < infty)
-TAU_INIT  = 5
-TAU_MIN   = 0.1
-TAU_DECAY = 0.9995
+TAU_INIT  = 2.2
+TAU_MIN   = 0.5
+TAU_DECAY = 0.999
 
 # N-step TD Q-learning:
 GAMMA   = 0.90 # Discount factor.
 N_STEPS = 1    # Number of steps to consider real, observed rewards. # TODO: Implement N-step TD Q-learning.
 
 # Auxilary:
-PLOT_FREQ = 25
+PLOT_FREQ = 50
 # -----------------------------------------------------------------------------
 
 # File name of historical training record used for plotting.
@@ -243,14 +243,17 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         self.state_history.append(state_to_vect(last_game_state)[0])
 
     # ---------- (2) Decrease the exploration rate: ----------
-    if self.act_strategy == 'eps-greedy':    
-        if self.epsilon > EXPLORATION_MIN:
-            self.epsilon *= EXPLORATION_DECAY
-    elif self.act_strategy == 'softmax':
-        if self.tau > TAU_MIN:
-            self.tau *= TAU_DECAY
-    else:
-        raise ValueError(f"Unknown act_strategy {self.act_strategy}")
+    if len(self.transitions) > BATCH_SIZE:
+        if self.act_strategy == 'eps-greedy':    
+            if self.epsilon > EXPLORATION_MIN:
+                self.epsilon *= EXPLORATION_DECAY
+        elif self.act_strategy == 'softmax':
+            if self.tau > TAU_MIN:
+                self.tau *= TAU_DECAY
+        else:
+            raise ValueError(f"Unknown act_strategy {self.act_strategy}")
+
+
 
     # ---------- (3) TD Q-learning with batch: ----------
     if len(self.transitions) > BATCH_SIZE and self.game_nr % TRAIN_FREQ == 0:
@@ -407,8 +410,8 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    survive_step = -0.1
-    lethal_magnitude = 0.5
+    survive_step = -0.05
+    lethal_magnitude = 0.1
 
     game_rewards = {
         # my Events:
@@ -433,8 +436,8 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
 
-        e.CRATE_DESTROYED: 1,
-        e.COIN_FOUND: 1,
+        e.CRATE_DESTROYED: 0.2,
+        e.COIN_FOUND: 0,
         e.COIN_COLLECTED: 1,
 
         e.KILLED_OPPONENT: 5,
