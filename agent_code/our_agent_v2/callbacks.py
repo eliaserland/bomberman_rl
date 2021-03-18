@@ -15,7 +15,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_potential_v2"         # Base filename of model (excl. extensions).
+FILENAME = "SGD_pot_v1"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'softmax'          # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -59,7 +59,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.01, warm_start=True, penalty='elasticnet'))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.001, warm_start=True))#, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -209,14 +209,15 @@ def state_to_features(game_state: dict) -> np.array:
         for i, d in enumerate(directions):
             pot_bombs[i] += np.sum(bomb_pot(bombs[0]-d[0], bombs[1]-d[1])) 
 
-
+    '''
     # TODO: GET GRADIENT ESTIMATES
     feat_crates = np.zeros(2)
     feat_coins = np.zeros(2)
     feat_bombs = np.zeros(2)
 
     feat_crates = np.array([pot_crates[0]-pot_crates[2], pot_crates[1]-pot_crates[3]])
-    
+    '''
+    pot = pot_bombs + pot_coins + pot_crates
     
     # -------------------------
 

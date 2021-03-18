@@ -393,7 +393,7 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    survive_step = 0
+    survive_step = -0.1
     game_rewards = {
         # my Events:
         SURVIVED_STEP:  survive_step,
