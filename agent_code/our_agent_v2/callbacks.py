@@ -355,19 +355,22 @@ def is_lethal(x: int, y: int, arena: np.array, bombs: list) -> bool:
 def destructible_crates(x: int, y: int, arena: np.array) -> int:
     """
     Count the no. of crates that would get destroyed by a bomb placed at (x,y).
+    Returns -1 if (x,y) is an invalid bomb placement.
     """
-    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
-    crates = 0
-    for direction in directions:
-        ix, iy = x, y
-        ix, iy = increment_position(ix, iy, direction)
-        while (not has_object(ix, iy, arena, 'wall') and
-               abs(x-ix) <= 3 and abs(y-iy) <= 3):
-            if has_object(ix, iy, arena, 'crate'):
-                crates += 1
+    if has_object(x, y, arena, 'free'):
+        directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+        crates = 0
+        for direction in directions:
+            ix, iy = x, y
             ix, iy = increment_position(ix, iy, direction)
-    return crates
-
+            while (not has_object(ix, iy, arena, 'wall') and
+                abs(x-ix) <= 3 and abs(y-iy) <= 3):
+                if has_object(ix, iy, arena, 'crate'):
+                    crates += 1
+                ix, iy = increment_position(ix, iy, direction)
+        return crates
+    else:
+        return -1
 
 def is_escapable(x: int, y: int, arena: np.array) -> bool:
     """
