@@ -451,7 +451,7 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
                  # alpha -> 0   : only considering no. of crates
                  # alpha -> inf : only considering shortest distance
 
-    # Breadth-first search for the best candidate tile for bomb placement.
+    # Breadth-first search for tile with most effective bomb placement.
     q = Queue()
     visited = [] 
     root = ((x, y), 0) # ((x, y), steps)
