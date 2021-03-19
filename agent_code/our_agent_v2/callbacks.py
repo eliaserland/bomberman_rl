@@ -244,7 +244,8 @@ def state_to_features(game_state: dict) -> np.array:
     scalar_feat = np.array([int(bombs_left), escapable])
     
     # Concatenating all subvectors into the final feature vector.
-    features = np.concatenate((scalar_feat, crates, escape_direction, lethal_directions, coin_dir, crates_direction), axis=None)
+    features = np.concatenate((scalar_feat, crates, escape_direction, lethal_directions,
+                               coin_dir, crates_direction), axis=None)
     # [bombs_left, escapable, crates1, crates2, crates3, crates4, crates_own, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step]
     # [         0,         1,       2,       3,       4,       5,          6,            7,            8,        9,       10,       11,       12,         13,     14,     15,        16,      17,      18,         19]
     return features.reshape(1,-1)
@@ -262,7 +263,7 @@ def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
 
 # --------------------
 
-def closest_coin_dir(x: int, y: int, coins: list) -> np.array:    
+def closest_coin_dir(x: int, y: int, coins: list) -> np.array:
     """
     Given the agent's position at (x,y) get the normalized position vector
     towards the closest revealed coin and the l1 distance to this coin. Returns

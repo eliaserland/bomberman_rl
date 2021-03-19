@@ -40,10 +40,10 @@ EXPLORATION_DECAY = 0.999
 # Softmax: (0 <= tau < infty)
 TAU_INIT  = 10
 TAU_MIN   = 0.1
-TAU_DECAY = 0.999
+TAU_DECAY = 0.9995
 
 # N-step TD Q-learning:
-GAMMA   = 0.95 # Discount factor.
+GAMMA   = 0.90 # Discount factor.
 N_STEPS = 8    # Number of steps to consider real, observed rewards.
 
 # Auxilary:
