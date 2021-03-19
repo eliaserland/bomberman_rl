@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_pot_v1"         # Base filename of model (excl. extensions).
+FILENAME = "SGD_nstep_v2"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'softmax'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -232,9 +232,15 @@ def state_to_features(game_state: dict) -> np.array:
     # Normalized vector indicating the direction of the closest coin.
     coin_dir = closest_coin_dir(x, y, coins)
 
+    """
     # No. of creates that would get destroyed by a bomb at the agent's position.
     crates = destructible_crates(x, y, arena)
     # TODO: Features using destructible_crates() for tiles in the agent's immedate surrounding.
+    """
+    crates = np.zeros(5)
+    for i, (ix, iy) in enumerate(directions):
+        crates[i] = destructible_crates(ix, iy, arena)
+
 
     # Find tile within a specified radius which can be reached by agent and destroyes the most crates
     crates_direction = crates_dir(x, y, 8, arena, bombs, others)
@@ -251,12 +257,12 @@ def state_to_features(game_state: dict) -> np.array:
         lethal_directions[i] = int(is_lethal(ix, iy, arena, bombs))
     
     # Joining the scalar features into a numpy vector.
-    scalar_feat = np.array([int(bombs_left), crates, escapable])
+    scalar_feat = np.array([int(bombs_left), escapable])
     
-    # Concatenating all vectors into the final feature vector.
-    features = np.concatenate((scalar_feat, escape_direction, lethal_directions, coin_dir, crates_direction), axis=None)
-    # [bombs_left, crates, escapable, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step]
-    # [         0,      1,         2,            3,            4,        5,        6,        7,        8,          9,     10,     11,        12,      13,      14,         15]
+    # Concatenating all subvectors into the final feature vector.
+    features = np.concatenate((scalar_feat, crates, escape_direction, lethal_directions, coin_dir, crates_direction), axis=None)
+    # [bombs_left, escapable, crates1, crates2, crates3, crates4, crates_own, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step]
+    # [         0,         1,       2,       3,       4,       5,          6,            7,            8,        9,       10,       11,       12,         13,     14,     15,        16,      17,      18,         19]
 
     return features.reshape(1,-1)
 
@@ -400,7 +406,8 @@ def get_free_neighbours(x: int, y: int, arena: np.array, bombs: list, others: li
     """
     directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
     neighbours = []
-    for ix, iy in directions:
+    random.shuffle(directions) # Randomize such that no direction is prioritized.
+    for ix, iy in directions: 
         if (has_object(ix, iy, arena, 'free') and
             not (ix, iy) in bombs and
             not (ix, iy) in others):
@@ -447,7 +454,7 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
     step count if no crates could be found within the n step radius.
     """
     candidates = [] 
-    alpha = 0.25 # Weighing the importance of short distance to no. of crates.
+    alpha = 0.35 # Weighing the importance of short distance to no. of crates.
                  # alpha -> 0   : only considering no. of crates
                  # alpha -> inf : only considering shortest distance
 

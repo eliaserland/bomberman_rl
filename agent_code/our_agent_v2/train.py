@@ -22,9 +22,9 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 20000 # Keep only ... last transitions.
-BATCH_SIZE              = 5000  # Size of batch in TD-learning.
-TRAIN_FREQ              = 15    # Train model every ... game.
+TRANSITION_HISTORY_SIZE = 30000 # Keep only ... last transitions.
+BATCH_SIZE              = 7500  # Size of batch in TD-learning.
+TRAIN_FREQ              = 10    # Train model every ... game.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
@@ -39,12 +39,12 @@ EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 <= tau < infty)
 TAU_INIT  = 10
-TAU_MIN   = 0.15
-TAU_DECAY = 0.9995
+TAU_MIN   = 0.1
+TAU_DECAY = 0.999
 
 # N-step TD Q-learning:
-GAMMA   = 0.99 # Discount factor.
-N_STEPS = 1    # Number of steps to consider real, observed rewards. # TODO: Implement N-step TD Q-learning.
+GAMMA   = 0.95 # Discount factor.
+N_STEPS = 8    # Number of steps to consider real, observed rewards.
 
 # Auxilary:
 PLOT_FREQ = 25
@@ -66,6 +66,7 @@ CLOSER_TO_COIN = "CLOSER_TO_COIN"
 FURTHER_FROM_COIN = "FURTHER_FROM_COIN"
 CLOSER_TO_CRATE = "CLOSER_TO_CRATE"
 FURTHER_FROM_CRATE = "FURTHER_FROM_CRATE"
+CERTAIN_SUICIDE = "CERTAIN_SUICIDE"
 
 def setup_training(self):
     """
@@ -166,16 +167,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             state_old = state_to_features(old_game_state)
 
             # The agent's lethal status at its position in each game state.
-            lethal_new = state_new[0,9]
-            lethal_old = state_old[0,9]
+            lethal_new = state_new[0,13]
+            lethal_old = state_old[0,13]
             if lethal_new > lethal_old:
                 events.append(ENTERED_LETHAL)
             elif lethal_old > lethal_new:
                 events.append(ESCAPED_LETHAL)
 
             # Closer to/futher from the closest coin.
-            coin_step_new = state_new[0,12]
-            coin_step_old = state_old[0,12]
+            coin_step_new = state_new[0,16]
+            coin_step_old = state_old[0,16]
             if coin_step_new != -1 and coin_step_old != -1:
                 if coin_step_old > coin_step_old:
                     events.append(CLOSER_TO_COIN)
@@ -183,13 +184,19 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     events.append(FURTHER_FROM_COIN)
 
             # Closer to/further from best crate position.
-            crate_step_new = state_new[0,15]
-            crate_step_old = state_old[0,15]
+            crate_step_new = state_new[0,19]
+            crate_step_old = state_old[0,19]
             if crate_step_new != -1 and crate_step_old != -1:
                 if crate_step_old > crate_step_new:
                     events.append(CLOSER_TO_CRATE)
                 elif crate_step_old < crate_step_new:
                     events.append(FURTHER_FROM_CRATE)
+
+            # Punish if bomb was placed in a position where escape was impossible.
+            inescapable = state_old[0,1] == 0
+            if inescapable and self_action == 'BOMB':
+                events.append(CERTAIN_SUICIDE)
+
 
 
         '''
@@ -286,7 +293,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
         self.transitions.append(Transition(n_step_old_feature_state, n_step_action, n_step_new_feature_state, n_step_reward, None))
     
-
     # Store the game state for learning of feature extration function.
     if last_game_state and not self.dr_override:
         self.state_history.append(state_to_vect(last_game_state)[0])
@@ -301,8 +307,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                 self.tau *= TAU_DECAY
         else:
             raise ValueError(f"Unknown act_strategy {self.act_strategy}")
-
-
 
     # ---------- (3) TD Q-learning with batch: ----------
     
@@ -464,7 +468,7 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    passive_constant = -0.05 # Always added to rewards for every step in game. 
+    passive_constant = -0.1 # Always added to rewards for every step in game. 
     lethal_movement  = 0.1   # Moving in/out of lethal range.
     coin_movement    = 0.2   # Moving closer to/further from closest coin.
     crate_movement   = 0.05  # Moving closer to/further from best crate position.
@@ -477,13 +481,14 @@ def reward_from_events(self, events: List[str]) -> int:
         ALREADY_KNOW_FIELD: 0,
         BACK_AND_FORTH: 0,
         
-        POTENTIAL_UPDATE: 0.1*self.pot_diff,
+        #POTENTIAL_UPDATE: 0.1*self.pot_diff,
         ESCAPED_LETHAL: lethal_movement,
         ENTERED_LETHAL: -lethal_movement,
         CLOSER_TO_COIN: coin_movement,
         FURTHER_FROM_COIN: -coin_movement,
         CLOSER_TO_CRATE: crate_movement,
         FURTHER_FROM_CRATE: -crate_movement,
+        CERTAIN_SUICIDE: -10,
         
         # Default events:
         e.MOVED_LEFT: 0,
@@ -497,11 +502,11 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_EXPLODED: 0,
 
         e.CRATE_DESTROYED: 0.2,
-        e.COIN_FOUND: 0.25,
+        e.COIN_FOUND: 0.1,
         e.COIN_COLLECTED: 1,
 
         e.KILLED_OPPONENT: 5,
-        e.KILLED_SELF: -5,
+        e.KILLED_SELF: -10,
 
         e.GOT_KILLED: -5,
         e.OPPONENT_ELIMINATED: 0,
