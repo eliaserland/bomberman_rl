@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_nstep_v2"         # Base filename of model (excl. extensions).
+FILENAME = "SGD_nstep_v6"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -60,7 +60,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.001, warm_start=True))#, penalty='elasticnet'))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001, warm_start=True, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -276,7 +276,7 @@ def closest_coin_dir(x: int, y: int, coins: list) -> np.array:
         (cx, cy), l1 = coins[np.argmin(l1_dist)], np.min(l1_dist) 
         rel_pos = (cx-x, cy-y)
         if rel_pos != (0, 0):
-            rel_dir = rel_pos / np.linalg.norm(rel_pos) 
+            rel_dir = rel_pos / l1
             return np.concatenate((rel_dir, l1), axis=None)
         else:
             return np.zeros(3)
@@ -427,7 +427,7 @@ def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np
         if escapable:
             rel_pos = (ix-x, iy-y)
             if rel_pos != (0, 0):
-                return rel_pos / np.linalg.norm(rel_pos) 
+                return rel_pos / np.linalg.norm(rel_pos, ord=1) 
     return np.zeros(2)
 
 
@@ -471,7 +471,7 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
                 cx, cy, c_steps = ix, iy, steps
         rel_pos = (cx-x, cy-y) 
         if rel_pos != (0, 0):
-            rel_dir = rel_pos / np.linalg.norm(rel_pos) 
+            rel_dir = rel_pos / np.linalg.norm(rel_pos, ord=1) 
             return np.concatenate((rel_dir, c_steps), axis=None)
         else: 
             return np.zeros(3)

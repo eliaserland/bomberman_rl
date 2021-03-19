@@ -23,8 +23,12 @@ Transition = namedtuple('Transition',
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
 TRANSITION_HISTORY_SIZE = 30000 # Keep only ... last transitions.
-BATCH_SIZE              = 7500  # Size of batch in TD-learning.
+BATCH_SIZE              = 10000 # Size of batch in TD-learning.
 TRAIN_FREQ              = 10    # Train model every ... game.
+
+# Prioritized experience replay:
+PRIO_EXP_REPLAY = True                 # Toggle on/off.
+PRIO_EXP_SIZE   = int(0.33*BATCH_SIZE) # Size of the chosen subset of TS.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
@@ -33,18 +37,18 @@ DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 <= epsilon <= 1)
-EXPLORATION_INIT  = 1
+EXPLORATION_INIT  = 1.0
 EXPLORATION_MIN   = 0.1
-EXPLORATION_DECAY = 0.999
+EXPLORATION_DECAY = 0.9999
 
 # Softmax: (0 <= tau < infty)
-TAU_INIT  = 10
-TAU_MIN   = 0.1
-TAU_DECAY = 0.9995
+TAU_INIT  = 15
+TAU_MIN   = 0.5
+TAU_DECAY = 0.999
 
 # N-step TD Q-learning:
-GAMMA   = 0.90 # Discount factor.
-N_STEPS = 8    # Number of steps to consider real, observed rewards.
+GAMMA   = 0.95 # Discount factor.
+N_STEPS = 10    # Number of steps to consider real, observed rewards.
 
 # Auxilary:
 PLOT_FREQ = 25
@@ -56,8 +60,7 @@ FNAME_DATA = f"{FILENAME}_data.pt"
 # Custom events:
 SURVIVED_STEP = "SURVIVED_STEP"
 DIED_DIRECT_NEXT_TO_BOMB = "DIED_DIRECT_NEXT_TO_BOMB"
-ALREADY_KNOW_FIELD = "ALREADY_KNOW_FIELD"
-BACK_AND_FORTH = "BACK_AND_FORTH"
+ALREADY_KNOWN_FIELD = "ALREADY_KNOWN_FIELD"
 
 POTENTIAL_UPDATE = "POTENTIAL_UPDATE"
 ESCAPED_LETHAL = "ESCAPED_LETHAL"
@@ -115,6 +118,7 @@ def setup_training(self):
     self.score_in_round   = 0
     self.collected_coins  = 0
     self.destroyed_crates = 0
+    self.loop_penalty     = 0
     self.perform_export  = False
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -141,18 +145,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.pot_diff = 0 # TODO: Make sense of this.
 
     if old_game_state:
-        """
-        _, score, bombs_left, (x, y) = old_game_state['self']
-        closest_coin_info_old = closets_coin_distance(old_game_state)
 
-        # penalty on loops:
-        # If agent has been in the same location three times recently, it's a loop
-        if self.coordinate_history.count((x, y)) > 1:
-            events.append(ALREADY_KNOW_FIELD)
-            if self.coordinate_history.count((x, y)) > 2:
-                events.append(BACK_AND_FORTH)
-        self.coordinate_history.append((x, y))
-        """
+        # Incur penalty by repeated visits of the same set of squares.
+        # Penalty scales quadratically by the number of repeated visits.
+        _, _, _, (x, y) = old_game_state['self']
+        self.coordinate_history.append((x, y))        
+        _, counts = np.unique(self.coordinate_history, return_counts=True)
+        self.loop_penalty = np.sum((counts-1)**2)
+        if self.loop_penalty > 0:
+            events.append(ALREADY_KNOWN_FIELD)
 
         """
         if new_game_state:
@@ -313,7 +314,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     if len(self.transitions) > BATCH_SIZE and self.game_nr % TRAIN_FREQ == 0:
         # Create a random batch from the transition history.
         batch = random.sample(self.transitions, BATCH_SIZE)
-        X, targets = [], []
+        X, targets, residuals = [], [], []
         for state, action, state_next, n_step_reward, n_step_next_state in batch:
             # Current state cannot be the state before game start.
             if state is not None:
@@ -340,7 +341,26 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                 # Append feature data and targets for the regression.
                 X.append(state[0])
                 targets.append(q_values[0])
-        
+
+                # Prioritized experience replay.
+                if PRIO_EXP_REPLAY and self.model_is_fitted:
+                    # Calculate the residuals for the training instance.
+                    action_idx = self.actions.index(action)
+                    X_tmp = X[-1].reshape(1, -1)
+                    target = targets[-1][action_idx]
+                    q_estimate = self.model.predict(X_tmp)[0][action_idx]
+                    res = (target - q_estimate)**2
+                    residuals.append(res)
+
+        # Prioritized experience replay.
+        if PRIO_EXP_REPLAY and self.model_is_fitted:
+            # Keep the N samples with the largest squared residuals.
+            idx = np.argpartition(residuals, -PRIO_EXP_SIZE)[-PRIO_EXP_SIZE:]
+
+            # Update the training set.            
+            X = [X[i] for i in list(idx)]
+            targets = [targets[i] for i in list(idx)]
+
         # Regression fit.
         self.model.fit(X, targets) #self.model.partial_fit(X, targets)
         self.model_is_fitted = True
@@ -362,7 +382,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
         # Since the feature extraction function is now changed, we need to start
         # the learning process of the Q-value function over from scratch.
-
         # Create a new, but unfitted, Q-value model of the same type as before.
         self.model = clone(self.model)
         self.model_is_fitted = False
@@ -468,27 +487,25 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    passive_constant = -0.1 # Always added to rewards for every step in game. 
+    passive_constant = -0.01 # Always added to rewards for every step in game.
     lethal_movement  = 0.1   # Moving in/out of lethal range.
-    coin_movement    = 0.2   # Moving closer to/further from closest coin.
+    coin_movement    = 0.25  # Moving closer to/further from closest coin.
     crate_movement   = 0.05  # Moving closer to/further from best crate position.
+    loop_factor      = -0.1  # Scale factor for loop penalty.
 
     # Game reward dictionary:
     game_rewards = {
         # Custom events:
         SURVIVED_STEP:  passive_constant,
         DIED_DIRECT_NEXT_TO_BOMB: 0,
-        ALREADY_KNOW_FIELD: 0,
-        BACK_AND_FORTH: 0,
+        ALREADY_KNOWN_FIELD: loop_factor * self.loop_penalty,
         
-        #POTENTIAL_UPDATE: 0.1*self.pot_diff,
-        ESCAPED_LETHAL: lethal_movement,
-        ENTERED_LETHAL: -lethal_movement,
+        #POTENTIAL_UPDeps-greedy -lethal_movement,
         CLOSER_TO_COIN: coin_movement,
         FURTHER_FROM_COIN: -coin_movement,
         CLOSER_TO_CRATE: crate_movement,
         FURTHER_FROM_CRATE: -crate_movement,
-        CERTAIN_SUICIDE: -10,
+        CERTAIN_SUICIDE: -5,
         
         # Default events:
         e.MOVED_LEFT: 0,
@@ -501,12 +518,12 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
 
-        e.CRATE_DESTROYED: 0.2,
-        e.COIN_FOUND: 0.1,
+        e.CRATE_DESTROYED: 0.25,
+        e.COIN_FOUND: 0.2,
         e.COIN_COLLECTED: 1,
 
         e.KILLED_OPPONENT: 5,
-        e.KILLED_SELF: -10,
+        e.KILLED_SELF: -5,
 
         e.GOT_KILLED: -5,
         e.OPPONENT_ELIMINATED: 0,
@@ -519,25 +536,3 @@ def reward_from_events(self, events: List[str]) -> int:
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
-
-
-def closets_coin_distance(game_state: dict) -> int:
-    '''
-    return the relative total distance from the 
-    agent to the closest Coin to check where Agent got closer to Coin.
-    '''
-    
-    _, score, bombs_left, (x, y) = game_state['self']
-    coins = game_state['coins']
-    coins_dis = []
-    for coin in coins:
-        total_step_distance = abs(coin[0]-x) + abs(coin[1]-y)
-        coin_dis = (total_step_distance)
-        coins_dis.append(coin_dis)
-    if coins:
-        closest_coin_dis = sorted(coins_dis)[0]
-        return closest_coin_dis
-    else:
-        return None
-
-     
