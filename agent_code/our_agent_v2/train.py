@@ -21,32 +21,32 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 30000 # Keep only ... last transitions.
+TRANSITION_HISTORY_SIZE = 20000 # Keep only ... last transitions.
 BATCH_SIZE              = 5000  # Size of batch in TD-learning.
 TRAIN_FREQ              = 15    # Train model every ... game.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
 DR_EPOCHS         = 30      # Nr. of epochs in mini-batch learning.
-DR_MINIBATCH_SIZE = 10000    # Nr. of states in each mini-batch.
+DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 <= epsilon <= 1)
-EXPLORATION_INIT  = 1
+EXPLORATION_INIT  = 5
 EXPLORATION_MIN   = 0.2
-EXPLORATION_DECAY = 0.9995
+EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 <= tau < infty)
-TAU_INIT  = 2.2
-TAU_MIN   = 0.5
-TAU_DECAY = 0.999
+TAU_INIT  = 10
+TAU_MIN   = 0.15
+TAU_DECAY = 0.9995
 
 # N-step TD Q-learning:
 GAMMA   = 0.90 # Discount factor.
 N_STEPS = 1    # Number of steps to consider real, observed rewards. # TODO: Implement N-step TD Q-learning.
 
 # Auxilary:
-PLOT_FREQ = 50
+PLOT_FREQ = 25
 # -----------------------------------------------------------------------------
 
 # File name of historical training record used for plotting.
@@ -56,14 +56,15 @@ FNAME_DATA = f"{FILENAME}_data.pt"
 SURVIVED_STEP = "SURVIVED_STEP"
 DIED_DIRECT_NEXT_TO_BOMB = "DIED_DIRECT_NEXT_TO_BOMB"
 ALREADY_KNOW_FIELD = "ALREADY_KNOW_FIELD"
-CLOSER_TO_COIN = "CLOSER_TO_COIN"
-AWAY_FROM_COIN = "AWAY_FROM_COIN"
 BACK_AND_FORTH = "BACK_AND_FORTH"
 
 POTENTIAL_UPDATE = "POTENTIAL_UPDATE"
 ESCAPED_LETHAL = "ESCAPED_LETHAL"
 ENTERED_LETHAL = "ENTERED_LETHAL"
-
+CLOSER_TO_COIN = "CLOSER_TO_COIN"
+FURTHER_FROM_COIN = "FURTHER_FROM_COIN"
+CLOSER_TO_CRATE = "CLOSER_TO_CRATE"
+FURTHER_FROM_CRATE = "FURTHER_FROM_CRATE"
 
 def setup_training(self):
     """
@@ -169,6 +170,24 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(ENTERED_LETHAL)
             elif lethal_old > lethal_new:
                 events.append(ESCAPED_LETHAL)
+
+            # Closer to/futher from the closest coin.
+            coin_step_new = state_new[0,12]
+            coin_step_old = state_old[0,12]
+            if coin_step_new != -1 and coin_step_old != -1:
+                if coin_step_old > coin_step_old:
+                    events.append(CLOSER_TO_COIN)
+                elif coin_step_old < coin_step_new:
+                    events.append(FURTHER_FROM_COIN)
+
+            # Closer to/further from best crate position.
+            crate_step_new = state_new[0,15]
+            crate_step_old = state_old[0,15]
+            if crate_step_new != -1 and crate_step_old != -1:
+                if crate_step_old > crate_step_new:
+                    events.append(CLOSER_TO_CRATE)
+                elif crate_step_old < crate_step_new:
+                    events.append(FURTHER_FROM_CRATE)
 
 
         '''
@@ -410,22 +429,28 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    survive_step = -0.05
-    lethal_magnitude = 0.1
+    passive_constant = -0.05 # Always added to rewards for every step in game. 
+    lethal_movement  = 0.1   # Moving in/out of lethal range.
+    coin_movement    = 0.2   # Moving closer to/further from closest coin.
+    crate_movement   = 0.05  # Moving closer to/further from best crate position.
 
+    # Game reward dictionary:
     game_rewards = {
-        # my Events:
-        SURVIVED_STEP:  survive_step,
+        # Custom events:
+        SURVIVED_STEP:  passive_constant,
         DIED_DIRECT_NEXT_TO_BOMB: 0,
         ALREADY_KNOW_FIELD: 0,
-        CLOSER_TO_COIN: 0,
-        AWAY_FROM_COIN: 0,
         BACK_AND_FORTH: 0,
         
         POTENTIAL_UPDATE: 0.1*self.pot_diff,
-        ESCAPED_LETHAL: lethal_magnitude,
-        ENTERED_LETHAL: -lethal_magnitude,
+        ESCAPED_LETHAL: lethal_movement,
+        ENTERED_LETHAL: -lethal_movement,
+        CLOSER_TO_COIN: coin_movement,
+        FURTHER_FROM_COIN: -coin_movement,
+        CLOSER_TO_CRATE: crate_movement,
+        FURTHER_FROM_CRATE: -crate_movement,
         
+        # Default events:
         e.MOVED_LEFT: 0,
         e.MOVED_RIGHT: 0,
         e.MOVED_UP: 0,
@@ -437,7 +462,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_EXPLODED: 0,
 
         e.CRATE_DESTROYED: 0.2,
-        e.COIN_FOUND: 0,
+        e.COIN_FOUND: 0.25,
         e.COIN_COLLECTED: 1,
 
         e.KILLED_OPPONENT: 5,
@@ -445,7 +470,7 @@ def reward_from_events(self, events: List[str]) -> int:
 
         e.GOT_KILLED: -5,
         e.OPPONENT_ELIMINATED: 0,
-        e.SURVIVED_ROUND: survive_step,
+        e.SURVIVED_ROUND: passive_constant,
     }
     
     reward_sum = 0

@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_pot_v6"         # Base filename of model (excl. extensions).
+FILENAME = "SGD_pot_v1"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'softmax'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -255,8 +255,8 @@ def state_to_features(game_state: dict) -> np.array:
     
     # Concatenating all vectors into the final feature vector.
     features = np.concatenate((scalar_feat, escape_direction, lethal_directions, coin_dir, crates_direction), axis=None)
-    # [bombs_left, crates, escapable, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y]
-    # [         0,      1,         2,            3,            4,        5,        6,        7,        8,          9,     10,     11]
+    # [bombs_left, crates, escapable, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step]
+    # [         0,      1,         2,            3,            4,        5,        6,        7,        8,          9,     10,     11,        12,      13,      14,         15]
 
     return features.reshape(1,-1)
 
@@ -273,17 +273,22 @@ def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
 def closest_coin_dir(x: int, y: int, coins: list) -> np.array:    
     """
     Given the agent's position at (x,y) get the normalized position vector
-    towards the closest revealed coin.
+    towards the closest revealed coin and the l1 distance to this coin. Returns 
+    the zero vector with -1 as the l1 distance if no coins are present.  
     """
     if coins:
         l1_dist = []
         for cx, cy in coins:
             l1_dist.append(abs(cx-x)+abs(cy-y))
-        cx, cy = coins[np.argmin(l1_dist)]
+        (cx, cy), l1 = coins[np.argmin(l1_dist)], np.min(l1_dist) 
         rel_pos = (cx-x, cy-y)
-        if rel_pos == (0, 0):
-            return rel_pos / np.linalg.norm(rel_pos)
-    return np.zeros(2)
+        if rel_pos != (0, 0):
+            rel_dir = rel_pos / np.linalg.norm(rel_pos) 
+            return np.concatenate((rel_pos, l1), axis=None)
+
+        else:
+            return np.zeros(3)
+    return np.array([0, 0, -1])
 
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
     """
@@ -425,46 +430,56 @@ def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np
                     q.put(neighbour)
         if escapable:
             rel_pos = (ix-x, iy-y)
-            if not rel_pos == (0, 0):
+            if rel_pos != (0, 0):
                 return rel_pos / np.linalg.norm(rel_pos) 
     return np.zeros(2)
 
 
 def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: list) -> np.array:
     """
-    Given the agent's position at (x,y) find the tile within n steps that 
-    would yield the largest amount of destroyed crates if a bomb where to be 
-    placed there. Return a normalized vector indicating the direction to this
-    tile. Return the zero vector if no crates can be found.
+    Given the agent's position at (x,y) find the tile within n steps which
+    would yield the largest amount of destroyed crates if a bomb where to be
+    placed there. Returns a vector with the normalized direction to this tile
+    and the number of steps to get there. Returns the zero vector with -1 as the
+    step count if no crates could be found within the n step radius.
     """
+    candidates = [] 
+    alpha = 0.25 # Weighing the importance of short distance to no. of crates.
+                 # alpha -> 0   : only considering no. of crates
+                 # alpha -> inf : only considering shortest distance
+
+    # Breadth-first search for the best candidate tile for bomb placement.
     q = Queue()
-    crates = []
     visited = [] 
-    root = ((x,y), 0)
+    root = ((x, y), 0) # ((x, y), steps)
     visited.append(root[0])
     q.put(root)
     while not q.empty():
-        (ix, iy), m = q.get()
-        if m > n:
+        (ix, iy), steps = q.get()
+        if steps > n:
             continue
-        c = destructible_crates(ix, iy, arena)
-        if c > 0:
-            crates.append((c, (ix, iy)))
+        crates = destructible_crates(ix, iy, arena)
+        if crates > 0:
+            candidates.append((crates, steps, (ix, iy)))
         neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
-        for neighbour in neighbours:
-            if not neighbour in visited:
-                visited.append(neighbour)
-                q.put((neighbour, m+1))
-    if crates:
-        c_max = 0
-        for c, (ix, iy) in crates:
-            if c > c_max:
-                c_max = c
-                cx, cy = ix, iy
-        rel_pos = (cx-x, cy-y)
-        if not rel_pos == (0, 0):
-            return rel_pos / np.linalg.norm(rel_pos) 
-    return np.zeros(2)
+        for neighb in neighbours:
+            if not neighb in visited:
+                visited.append(neighb)
+                q.put((neighb, steps+1))
+    if candidates:
+        w_max = 0
+        for crates, steps, (ix, iy) in candidates:
+            w = crates * np.exp(-alpha*steps)
+            if w > w_max:
+                w_max = w
+                cx, cy, c_steps = ix, iy, steps
+        rel_pos = (cx-x, cy-y) 
+        if rel_pos != (0, 0):
+            rel_dir = rel_pos / np.linalg.norm(rel_pos) 
+            return np.concatenate((rel_dir, c_steps), axis=None)
+        else: 
+            return np.zeros(3)
+    return np.array([0, 0, -1])
 
 
 
