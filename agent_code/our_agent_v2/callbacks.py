@@ -17,7 +17,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
 FILENAME = "SGD_nstep_v2"         # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'softmax'        # Options: 'softmax', 'eps-greedy'
+ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -148,9 +148,7 @@ def state_to_vect(game_state: dict) -> np.array:
     # Flat array of base arena.
     arena = game_state['field'].flatten()
 
-    # Flat array with info of own agent.
-    _, _, bombs_left, (x, y) = game_state['self']
-    self_info = np.array([int(bombs_left), x, y])
+    # Flat array with info of own agent.pos, y])
 
     # 
     bombs    = game_state['bombs']
@@ -189,21 +187,19 @@ def state_to_features(game_state: dict) -> np.array:
     #            ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT']
     directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
 
-    # Initialization of the potetials.
-    pot_crates = np.zeros(len(directions))
-    pot_coins  = np.zeros(len(directions))
-    #pot_bombs  = np.zeros(len(directions))
-
     """
-    # ---- Potential-based ----
+    # ---- Potential-based --------------------------------------------------
+    # Initialization of the potetials.
+    #pot_crates = np.zeros(len(directions))
+    #pot_coins  = np.zeros(len(directions))
+    #pot_bombs  = np.zeros(len(directions))
+    
     # Crates:
     x_crates, y_crates = np.where(arena == 1)
     for i, d in enumerate(directions):
         pot_crates[i] += np.sum(gaussian(x_crates-d[0], y_crates-d[1], sigma=3, height=0.25))
-    """
-
+    
     # Coins
-    """
     if coins:
         coins_arr = np.array(coins).T
         for i, d in enumerate(directions):
@@ -211,9 +207,7 @@ def state_to_features(game_state: dict) -> np.array:
     coins_grad = np.zeros(2)
     [(pot_coins[1]-pot_coins[3]),  (pot_coins[0]-pot_coins[2])]
     coins_grad = np.array([])
-    """
 
-    """
     # Bombs
     if bombs:
         bomb_arr = np.array(bombs).T
@@ -221,26 +215,16 @@ def state_to_features(game_state: dict) -> np.array:
             pot_bombs[i] += np.sum(bomb_pot(bomb_arr[0]-d[0], bomb_arr[1]-d[1])) 
     
     # TODO: GET GRADIENT ESTIMATES
-    feat_crates = np.zeros(2)
-    feat_coins = np.zeros(2)
-    feat_bombs = np.zeros(2)crates_direction
     """
-    # -------------------------
-    # -------------------------
-    # -------------------------
-    
+    # -----------------------------------------------------------------------
     # Normalized vector indicating the direction of the closest coin.
     coin_dir = closest_coin_dir(x, y, coins)
 
-    """
-    # No. of creates that would get destroyed by a bomb at the agent's position.
-    crates = destructible_crates(x, y, arena)
-    # TODO: Features using destructible_crates() for tiles in the agent's immedate surrounding.
-    """
+    # For all tiles in the agent's immidiate surrounding, get the no. of crates 
+    # which would get destroyed by a bomb placed at its location. 
     crates = np.zeros(5)
     for i, (ix, iy) in enumerate(directions):
-        crates[i] = destructible_crates(ix, iy, arena)
-
+        crates[i] = destructible_crates(ix, iy, arena) #/10 # TODO: Normalize by max no. of destructible crates??
 
     # Find tile within a specified radius which can be reached by agent and destroyes the most crates
     crates_direction = crates_dir(x, y, 8, arena, bombs, others)
@@ -263,9 +247,9 @@ def state_to_features(game_state: dict) -> np.array:
     features = np.concatenate((scalar_feat, crates, escape_direction, lethal_directions, coin_dir, crates_direction), axis=None)
     # [bombs_left, escapable, crates1, crates2, crates3, crates4, crates_own, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step]
     # [         0,         1,       2,       3,       4,       5,          6,            7,            8,        9,       10,       11,       12,         13,     14,     15,        16,      17,      18,         19]
-
     return features.reshape(1,-1)
 
+# ---- Potentials ----
 
 def gaussian(x: np.array, y: np.array, sigma: float=1, height: float=1) -> np.array:
     return height*np.exp(-0.5*(x**2+y**2)/sigma**2)
@@ -276,11 +260,13 @@ def bomb_pot(x: np.array, y: np.array, diag: float=20, height: float=10) -> np.a
 def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
     return height*1/(1+x**2+y**2)
 
+# --------------------
+
 def closest_coin_dir(x: int, y: int, coins: list) -> np.array:    
     """
     Given the agent's position at (x,y) get the normalized position vector
-    towards the closest revealed coin and the l1 distance to this coin. Returns 
-    the zero vector with -1 as the l1 distance if no coins are present.  
+    towards the closest revealed coin and the l1 distance to this coin. Returns
+    the zero vector with -1 as the l1 distance if no coins are present.
     """
     if coins:
         l1_dist = []
@@ -290,8 +276,7 @@ def closest_coin_dir(x: int, y: int, coins: list) -> np.array:
         rel_pos = (cx-x, cy-y)
         if rel_pos != (0, 0):
             rel_dir = rel_pos / np.linalg.norm(rel_pos) 
-            return np.concatenate((rel_pos, l1), axis=None)
-
+            return np.concatenate((rel_dir, l1), axis=None)
         else:
             return np.zeros(3)
     return np.array([0, 0, -1])

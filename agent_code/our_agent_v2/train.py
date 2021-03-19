@@ -33,8 +33,8 @@ DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 <= epsilon <= 1)
-EXPLORATION_INIT  = 5
-EXPLORATION_MIN   = 0.2
+EXPLORATION_INIT  = 1
+EXPLORATION_MIN   = 0.1
 EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 <= tau < infty)
