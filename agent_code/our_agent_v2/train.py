@@ -22,13 +22,13 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 40000 # Keep only ... last transitions.
+TRANSITION_HISTORY_SIZE = 30000 # Keep only ... last transitions.
 BATCH_SIZE              = 20000 # Size of batch in TD-learning.
-TRAIN_FREQ              = 10    # Train model every ... game.
+TRAIN_FREQ              = 25    # Train model every ... game.
 
 # N-step TD Q-learning:
-GAMMA   = 0.95  # Discount factor.
-N_STEPS = 10    # Number of steps to consider real, observed rewards.
+GAMMA   = 0.85  # Discount factor.
+N_STEPS = 5    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
 PRIO_EXP_REPLAY = True                # Toggle on/off.
@@ -51,7 +51,7 @@ TAU_MIN   = 0.5
 TAU_DECAY = 0.999
 
 # Auxilary:
-PLOT_FREQ = 25
+PLOT_FREQ = 100
 # -----------------------------------------------------------------------------
 
 # File name of historical training record used for plotting.
@@ -78,7 +78,7 @@ def setup_training(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     # Ques to store the transition tuples and coordinate history of agent.
-    self.transitions        = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
+    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
     self.bomb_history = deque([], 5)                    # short term memory of bomb placements by agent.
     self.n_step_transitions = deque([], N_STEPS)
     
