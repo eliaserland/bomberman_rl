@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "SGD_nstep_v6"         # Base filename of model (excl. extensions).
+FILENAME = "SGD_nstep_reduced_v1"         # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -60,7 +60,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001, warm_start=True, penalty='elasticnet'))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.01, warm_start=True, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -80,7 +80,7 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     # --------- (1) Only allow valid actions: -----------------
-    mask, valid_actions =  get_valid_action(game_state)
+    mask, valid_actions = get_valid_action(game_state)
 
     # --------- (2a) Softmax decision strategy: ---------------
     if self.act_strategy == 'softmax':
@@ -169,13 +169,16 @@ def state_to_vect(game_state: dict) -> np.array:
     bomb_map = game_state['explosion_map'].flatten()
     
     out = np.concatenate((arena, self_info, bombs, others, coins, bomb_map), axis=None)
-
+    
     return out.reshape(1, -1)
 
 
 def state_to_features(game_state: dict) -> np.array:
     """
+    Converts the game state dictionary to a feature vector.
 
+    :param game_state:  A dictionary describing the current game board.
+    :return: np.array
     """
     # Extracting information from the game state dictionary.
     _, _, bombs_left, (x, y) = game_state['self']
@@ -185,73 +188,38 @@ def state_to_features(game_state: dict) -> np.array:
     others = [xy for (n, s, b, xy) in game_state['others']]
 
     #            ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT']
-    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
-
-    """
-    # ---- Potential-based --------------------------------------------------
-    # Initialization of the potetials.
-    #pot_crates = np.zeros(len(directions))
-    #pot_coins  = np.zeros(len(directions))
-    #pot_bombs  = np.zeros(len(directions))
-    
-    # Crates:
-    x_crates, y_crates = np.where(arena == 1)
-    for i, d in enumerate(directions):
-        pot_crates[i] += np.sum(gaussian(x_crates-d[0], y_crates-d[1], sigma=3, height=0.25))
-    
-    # Coins
-    if coins:
-        coins_arr = np.array(coins).T
-        for i, d in enumerate(directions):
-            pot_coins[i] += np.sum(inv_squared(coins_arr[0]-d[0], coins_arr[1]-d[1]))
-    coins_grad = np.zeros(2)
-    [(pot_coins[1]-pot_coins[3]),  (pot_coins[0]-pot_coins[2])]
-    coins_grad = np.array([])
-
-    # Bombs
-    if bombs:
-        bomb_arr = np.array(bombs).T
-        for i, d in enumerate(directions):
-            pot_bombs[i] += np.sum(bomb_pot(bomb_arr[0]-d[0], bomb_arr[1]-d[1])) 
-    
-    # TODO: GET GRADIENT ESTIMATES
-    """
-    # -----------------------------------------------------------------------
-    # Normalized vector indicating the direction of the closest coin.
+    #directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
+ 
+    # ---- COINS ----
+    # Normalized vector indicating the direction of the closest coin and the no.
+    # of steps to get there
     coin_dir = closest_coin_dir(x, y, coins)
 
-    # For all tiles in the agent's immidiate surrounding, get the no. of crates 
-    # which would get destroyed by a bomb placed at its location. 
-    crates = np.zeros(5)
-    for i, (ix, iy) in enumerate(directions):
-        crates[i] = destructible_crates(ix, iy, arena) #/10 # TODO: Normalize by max no. of destructible crates??
-
+    # ---- CRATES ----
     # Find tile within a specified radius which can be reached by agent and destroyes the most crates
-    crates_direction = crates_dir(x, y, 8, arena, bombs, others)
+    crates_direction = crates_dir(x, y, 10, arena, bombs, others)
 
-    # Agent can escape from a potential bomb placed at its current position.
+    # ---- ESCAPE FROM BOMB ----
+    # Agent can escape from its own bomb, if placed at its current position.
     escapable = int(is_escapable(x, y, arena))
 
     # Normalized vector indicating the direction of the nearest non-lethal tile.
     escape_direction = escape_dir(x, y, arena, bombs, others)
 
-    # Check if the tiles in the agent's surrounding are lethal.
-    lethal_directions = np.zeros(5)
-    for i, (ix, iy) in enumerate(directions):
-        lethal_directions[i] = int(is_lethal(ix, iy, arena, bombs))
-    
+    # ---- LETHAL INDICATOR  -----
+    # Check if the agent's position is lethally dangerous.
+    lethal = int(is_lethal(x, y, arena, bombs))
+ 
+    # ---------------------------
     # Joining the scalar features into a numpy vector.
-    scalar_feat = np.array([int(bombs_left), escapable])
-    
+    scalar_feat = np.array([int(bombs_left), escapable, lethal])
     # Concatenating all subvectors into the final feature vector.
-    features = np.concatenate((scalar_feat, crates, escape_direction, lethal_directions,
-                               coin_dir, crates_direction), axis=None)
-    # [bombs_left, escapable, crates1, crates2, crates3, crates4, crates_own, escape_dir_x, escape_dir_y, lethal_1, lethal_2, lethal_3, lethal_4, lethal_own, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step]
-    # [         0,         1,       2,       3,       4,       5,          6,            7,            8,        9,       10,       11,       12,         13,     14,     15,        16,      17,      18,         19]
+    features = np.concatenate((scalar_feat, coin_dir, crates_direction, escape_direction), axis=None)
+    # [bombs_left, escapable, lethal, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step, escape_x, escape_y]
+    # [         0,         1,      2,      3,      4,         5,       6,       7,          8,        9,       10]
     return features.reshape(1,-1)
 
 # ---- Potentials ----
-
 def gaussian(x: np.array, y: np.array, sigma: float=1, height: float=1) -> np.array:
     return height*np.exp(-0.5*(x**2+y**2)/sigma**2)
 
@@ -260,7 +228,6 @@ def bomb_pot(x: np.array, y: np.array, diag: float=20, height: float=10) -> np.a
 
 def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
     return height*1/(1+x**2+y**2)
-
 # --------------------
 
 def closest_coin_dir(x: int, y: int, coins: list) -> np.array:
@@ -329,20 +296,23 @@ def is_lethal(x: int, y: int, arena: np.array, bombs: list) -> bool:
     Check if position (x,y) is within the lethal range of any of the ticking
     bombs. Returns True if the position is within blast radius.
     """
-    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']        
-    if bombs:        
-        for (bx, by) in bombs:
-            if bx == x and by == y:
-                return True
-            for direction in directions:
-                ix, iy = bx, by
-                ix, iy = increment_position(ix, iy, direction)
-                while (not has_object(ix, iy, arena, 'wall') and
-                       abs(ix-bx) <= 3 and abs(iy-by) <= 3):
-                    if ix == x and iy == y:
-                        return True
+    if not has_object(x, y, arena, 'wall'):
+        directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']        
+        if bombs:        
+            for (bx, by) in bombs:
+                if bx == x and by == y:
+                    return True
+                for direction in directions:
+                    ix, iy = bx, by
                     ix, iy = increment_position(ix, iy, direction)
-    return False
+                    while (not has_object(ix, iy, arena, 'wall') and
+                        abs(ix-bx) <= 3 and abs(iy-by) <= 3):
+                        if ix == x and iy == y:
+                            return True
+                        ix, iy = increment_position(ix, iy, direction)
+        return False
+    raise ValueError("Lethal status undefined for tile of type 'wall'.")
+
 
 def destructible_crates(x: int, y: int, arena: np.array) -> int:
     """
@@ -356,7 +326,7 @@ def destructible_crates(x: int, y: int, arena: np.array) -> int:
             ix, iy = x, y
             ix, iy = increment_position(ix, iy, direction)
             while (not has_object(ix, iy, arena, 'wall') and
-                abs(x-ix) <= 3 and abs(y-iy) <= 3):
+                   abs(x-ix) <= 3 and abs(y-iy) <= 3):
                 if has_object(ix, iy, arena, 'crate'):
                     crates += 1
                 ix, iy = increment_position(ix, iy, direction)
@@ -372,23 +342,27 @@ def is_escapable(x: int, y: int, arena: np.array) -> bool:
     # TODO: is_escapable() needs to consider that another agents might block its way.
     # TODO: is_escapable() should consider the effect of other agent's active bombs.
     """
-    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
-    for direction in directions:
-        ix, iy = x, y
-        ix, iy = increment_position(ix, iy, direction)
-        while has_object(ix, iy, arena, 'free'):
-            if abs(x-ix) > 3 or abs(y-iy) > 3:
-                return True
-            jx, jy, kx, ky = check_sides(ix, iy, direction)
-            if (has_object(jx, jy, arena, 'free') or
-                has_object(kx, ky, arena, 'free')):
-                return True
+    if has_object(x, y, arena, 'free'):
+        directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+        for direction in directions:
+            ix, iy = x, y
             ix, iy = increment_position(ix, iy, direction)
-    return False
+            while has_object(ix, iy, arena, 'free'):
+                if abs(x-ix) > 3 or abs(y-iy) > 3:
+                    return True
+                jx, jy, kx, ky = check_sides(ix, iy, direction)
+                if (has_object(jx, jy, arena, 'free') or
+                    has_object(kx, ky, arena, 'free')):
+                    return True
+                ix, iy = increment_position(ix, iy, direction)
+        return False
+    else:
+        raise ValueError("Can only check escape status on free tiles.")
 
 def get_free_neighbours(x: int, y: int, arena: np.array, bombs: list, others: list) -> list:
     """
-    Get a list the positions of all free tiles neighbouring position (x,y).
+    Get a list of all free and unoccupied tiles directly neighbouring the 
+    position with indices (x,y).
     """
     directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
     neighbours = []
@@ -427,7 +401,7 @@ def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np
         if escapable:
             rel_pos = (ix-x, iy-y)
             if rel_pos != (0, 0):
-                return rel_pos / np.linalg.norm(rel_pos, ord=1) 
+                return rel_pos / np.linalg.norm(rel_pos, ord=1)
     return np.zeros(2)
 
 
@@ -440,13 +414,13 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
     step count if no crates could be found within the n step radius.
     """
     candidates = [] 
-    alpha = 0.35 # Weighing the importance of short distance to no. of crates.
+    alpha = 0.2 # Weighing the importance of short distance to no. of crates.
                  # alpha -> 0   : only considering no. of crates
                  # alpha -> inf : only considering shortest distance
 
-    # Breadth-first search for tile with most effective bomb placement.
+    # Breadth-first search for the tile with most effective bomb placement.
     q = Queue()
-    visited = [] 
+    visited = []
     root = ((x, y), 0) # ((x, y), steps)
     visited.append(root[0])
     q.put(root)
@@ -455,7 +429,7 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
         if steps > n:
             continue
         crates = destructible_crates(ix, iy, arena)
-        if crates > 0:
+        if crates > 0 and is_escapable(ix, iy, arena):
             candidates.append((crates, steps, (ix, iy)))
         neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
         for neighb in neighbours:
@@ -469,80 +443,14 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
             if w > w_max:
                 w_max = w
                 cx, cy, c_steps = ix, iy, steps
-        rel_pos = (cx-x, cy-y) 
+        rel_pos = (cx-x, cy-y)
         if rel_pos != (0, 0):
             rel_dir = rel_pos / np.linalg.norm(rel_pos, ord=1) 
             return np.concatenate((rel_dir, c_steps), axis=None)
-        else: 
+        else:
             return np.zeros(3)
     return np.array([0, 0, -1])
 
-
-
-
-
-
-
-
-'''
-def state_to_features(game_state: dict) -> np.array:
-    """
-    Converts the game state dictionary to a feature vector.
-
-    :param game_state:  A dictionary describing the current game board.
-    :return: np.array
-    """    
-    # Gather information about the game state
-    arena = game_state['field']
-    _, score, bombs_left, (x, y) = game_state['self']
-    bombs = game_state['bombs']
-    bomb_xys = [xy for (xy, t) in bombs]
-    others = [xy for (n, s, b, xy) in game_state['others']]
-    coins = game_state['coins']
-    bomb_map = game_state['explosion_map']    
-    
-    max_distance_x = s.ROWS - 2 #s.ROWS - 3 ? 
-    max_distance_y = s.COLS - 2
-
-    # (1) get relative,normlaized step distances to closest coin
-    coins_info = []
-    for coin in coins:
-        x_coin_dis = coin[0] - x
-        y_coin_dis = coin[1] - y
-        total_step_distance = abs(x_coin_dis) + abs(y_coin_dis)
-        coin_info = (x_coin_dis , y_coin_dis , total_step_distance)
-        coins_info.append(coin_info)
-
-    # #TODO:FIX THIS
-    h = 0
-    v = 0
-    if coins_info:
-        closest_coin_info = sorted(coins_info, key=itemgetter(2))[0]  # TODO: This breaks with no coins.
-        #print(closest_coin_info)
-        if closest_coin_info[2] == 0:
-            h = 0
-            v = 0
-        else:
-            h = closest_coin_info[0]/closest_coin_info[2]  #normalize with total difference to coin   
-            v = closest_coin_info[1]/closest_coin_info[2]  
-
-    # (2) encounter for relative postion of agent in arena: 
-    # is between two invalide field horizontal (not L and R, do U and D)
-    # is between two invalide field vertical (do L and R, not U and D)
-    # somewhere else (not L and R, not U and D)
-    # will increase number of states with a factor 3
-    mask, valid_actions =  get_valid_action(game_state)
-    
-    relative_position_vertical   = 0
-    relative_position_horizontal = 0
-
-    if 'RIGHT' not in valid_actions and 'LEFT' not in valid_actions:
-        relative_position_horizontal = 1
-    if 'UP' not in valid_actions and 'DOWN' not in valid_actions:
-        relative_position_vertical = 1
-    features = np.array([h , v , relative_position_horizontal , relative_position_vertical])
-    return features.reshape(1, -1)
-'''
 
 def get_valid_action(game_state: dict):
     """
@@ -580,7 +488,7 @@ def get_valid_action(game_state: dict):
             mask[i] = 1                      # Binary mask
             
     # Bombing:
-    if bombs_left and aggressive_play: 
+    if bombs_left and is_escapable(x, y, arena) and aggressive_play:
         valid_actions.append(ACTIONS[-1])
         mask[-1] = 1
 
