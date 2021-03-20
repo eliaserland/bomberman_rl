@@ -22,7 +22,7 @@ Transition = namedtuple('Transition',
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
 TRANSITION_HISTORY_SIZE = 10000 # Keep only ... last transitions.
-BATCH_SIZE              = 5000 # Size of batch in TD-learning.
+BATCH_SIZE              = 5000  # Size of batch in TD-learning.
 TRAIN_FREQ              = 10    # Train model every ... game.
 
 # N-step TD Q-learning:
@@ -30,7 +30,7 @@ GAMMA   = 0.95  # Discount factor.
 N_STEPS = 10    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
-PRIO_EXP_REPLAY = True                 # Toggle on/off.
+PRIO_EXP_REPLAY = True                # Toggle on/off.
 PRIO_EXP_SIZE   = int(0.5*BATCH_SIZE) # Size of the chosen subset of TS.
 
 # Dimensionality reduction from learning experience.
@@ -42,7 +42,7 @@ DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 # Epsilon-Greedy: (0 <= epsilon <= 1)
 EXPLORATION_INIT  = 1.0
 EXPLORATION_MIN   = 0.1
-EXPLORATION_DECAY = 0.995
+EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 <= tau < infty)
 TAU_INIT  = 15
@@ -137,8 +137,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    ################# (1) Add own events to hand out rewards #################
-
+    # ---------- (1) Add own events to hand out rewards: ----------
     if old_game_state:
         # Extract feature vector:
         state_old = state_to_features(old_game_state)
@@ -173,7 +172,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(WAITED_UNNECESSARILY)
 
         if new_game_state:
-            # Extract feature vector: 
+            # Extract feature vector:
             state_new = state_to_features(new_game_state)
 
             # The agent's lethal status at its position in each game state.
@@ -206,8 +205,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if not 'GOT_KILLED' in events:
         events.append(SURVIVED_STEP)         
     
-    ################## (2) Compute n-step reward and store tuble in Transitions: #################
-
+    # ---------- (2) Compute n-step reward and store tuple in Transitions: ----------
     self.n_step_transitions.append((transform(self, old_game_state), self_action, transform(self, new_game_state), reward_from_events(self, events)))
     
     if len(self.n_step_transitions) == N_STEPS:
@@ -223,14 +221,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         
         self.transitions.append(Transition(n_step_old_feature_state, n_step_action, n_step_new_feature_state, n_step_reward, after_n_step_new_feature_state))
 
-    ################## (3) Store the game state for feature extration function learning: #################
-    
+    # ---------- (3) Store the game state for feature extration function learning: ----------
     # Store the game state for learning of feature extration function.    
     if old_game_state and not self.dr_override:
         self.state_history.append(state_to_vect(old_game_state)[0])
 
-    ################# (4) For evaluation purposes: #################
-    
+    # ---------- (4) For evaluation purposes: ----------
     if 'COIN_COLLECTED' in events:
         self.collected_coins += 1
     if 'CRATE_DESTROYED' in events:
@@ -252,12 +248,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
     
-    # ---------- (1) Compute last n-step reward and store tuble in Transitions ----------
-    
+    # ---------- (1) Compute last n-step reward and store tuple in Transitions ----------
     self.n_step_transitions.append((transform(self, last_game_state), last_action, None, reward_from_events(self, events)))
     
     if len(self.n_step_transitions) == N_STEPS:
-        
         reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
         n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
         
@@ -282,8 +276,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         else:
             raise ValueError(f"Unknown act_strategy {self.act_strategy}")
 
-    # ---------- (3) TD Q-learning with batch: ----------
-    
+    # ---------- (3) N-step TD Q-learning with batch: ----------
     if len(self.transitions) > BATCH_SIZE and self.game_nr % TRAIN_FREQ == 0:
         # Create a random batch from the transition history.
         batch = random.sample(self.transitions, BATCH_SIZE)
@@ -335,8 +328,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             targets = [targets[i] for i in list(idx)]
 
         # Regression fit.
-        #self.model.fit(X, targets) 
-        self.model.partial_fit(X, targets)
+        self.model.fit(X, targets) 
+        #self.model.partial_fit(X, targets)
         self.model_is_fitted = True
 
         # Raise flag for export of the learned model.
@@ -374,8 +367,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         # Raise flag for export of full model.
         self.perform_export = True
 
-    # ---------- (5) Clean n step transition history: don't compute aggregated reward beyond one game ----------
-    
+    # ---------- (5) Clear N-step transition history: ----------
+    # Do not compute the aggregated rewards beyond one game.
     self.n_step_transitions.clear()
 
     # ---------- (6) Model export: ----------
@@ -412,7 +405,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     
     # Plot training progress every n:th game.
     if self.game_nr % PLOT_FREQ == 0:
-
         # Incorporate the full training history.
         games_list = self.historic_data['games']
         score_list = self.historic_data['score']
@@ -452,7 +444,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         fig.tight_layout()
         plt.savefig(f'TrainEval_{FILENAME}.pdf')
         plt.close('all')
-       
 
 def reward_from_events(self, events: List[str]) -> int:
     """
