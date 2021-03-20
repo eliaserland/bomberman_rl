@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "coins_verification" #SGD_nstep_reduced_v1"         # Base filename of model (excl. extensions).
+FILENAME = "crates_trial_long_v1"  # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -60,7 +60,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.01, warm_start=True, penalty='elasticnet'))
+        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.001, warm_start=True)) #, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:

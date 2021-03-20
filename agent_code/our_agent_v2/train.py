@@ -13,7 +13,8 @@ from sklearn.base import clone
 
 import settings as s
 import events as e
-from .callbacks import transform, state_to_features, state_to_vect, has_object, is_lethal, fname, FILENAME
+from .callbacks import (transform, state_to_features, state_to_vect, has_object,
+                        is_lethal, fname, FILENAME)
 
 # Transition tuple. (s, a, r, s')
 Transition = namedtuple('Transition',
@@ -21,8 +22,8 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 10000 # Keep only ... last transitions.
-BATCH_SIZE              = 5000  # Size of batch in TD-learning.
+TRANSITION_HISTORY_SIZE = 40000 # Keep only ... last transitions.
+BATCH_SIZE              = 20000 # Size of batch in TD-learning.
 TRAIN_FREQ              = 10    # Train model every ... game.
 
 # N-step TD Q-learning:
@@ -39,12 +40,12 @@ DR_EPOCHS         = 30      # Nr. of epochs in mini-batch learning.
 DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
-# Epsilon-Greedy: (0 <= epsilon <= 1)
+# Epsilon-Greedy: (0 < epsilon < 1)
 EXPLORATION_INIT  = 1.0
 EXPLORATION_MIN   = 0.1
 EXPLORATION_DECAY = 0.999
 
-# Softmax: (0 <= tau < infty)
+# Softmax: (0 < tau < infty)
 TAU_INIT  = 15
 TAU_MIN   = 0.5
 TAU_DECAY = 0.999
@@ -452,11 +453,11 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    passive_constant = -0.1 # Always added to rewards for every step in game.
-    lethal_movement  = 0.5   # Moving in/out of lethal range.
-    coin_movement    = 0.25  # Moving closer to/further from closest coin.
-    crate_movement   = 0.1  # Moving closer to/further from best crate position.
-    loop_factor      = -0.1  # Scale factor for loop penalty.
+    passive_constant = -0.1     # Always added to rewards for every step in game.
+    lethal_movement  = 1.0      # Moving in/out of lethal range.
+    coin_movement    = 0.25     # Moving closer to/further from closest coin.
+    crate_movement   = 0.1      # Moving closer to/further from best crate position.
+    loop_factor      = -0.1     # Scale factor for loop penalty.
 
     # Game reward dictionary:
     game_rewards = {
