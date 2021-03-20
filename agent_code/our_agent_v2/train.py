@@ -42,8 +42,8 @@ DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
 EXPLORATION_INIT  = 1.0
-EXPLORATION_MIN   = 0.1
-EXPLORATION_DECAY = 0.999
+EXPLORATION_MIN   = 0.15
+EXPLORATION_DECAY = 0.9999
 
 # Softmax: (0 < tau < infty)
 TAU_INIT  = 15
@@ -214,13 +214,13 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
         n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
         
-        n_step_old_feature_state = self.n_step_transitions[0][0]
-        n_step_new_feature_state = self.n_step_transitions[0][2]
+        n_step_old_state = self.n_step_transitions[0][0]
+        n_step_new_state = self.n_step_transitions[0][2]
         n_step_action = self.n_step_transitions[0][1]
         
-        after_n_step_new_feature_state = self.n_step_transitions[-1][2]
+        after_n_step_new_state = self.n_step_transitions[-1][2]
         
-        self.transitions.append(Transition(n_step_old_feature_state, n_step_action, n_step_new_feature_state, n_step_reward, after_n_step_new_feature_state))
+        self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward, after_n_step_new_state))
 
     # ---------- (3) Store the game state for feature extration function learning: ----------
     # Store the game state for learning of feature extration function.    
@@ -256,11 +256,11 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
         n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
         
-        n_step_old_feature_state = self.n_step_transitions[0][0]
-        n_step_new_feature_state = self.n_step_transitions[0][2]
+        n_step_old_state = self.n_step_transitions[0][0]
+        n_step_new_state = self.n_step_transitions[0][2]
         n_step_action = self.n_step_transitions[0][1]
 
-        self.transitions.append(Transition(n_step_old_feature_state, n_step_action, n_step_new_feature_state, n_step_reward, None))
+        self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward, None))
     
     # Store the game state for learning of feature extration function.
     if last_game_state and not self.dr_override:
@@ -454,7 +454,7 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     passive_constant = -0.1     # Always added to rewards for every step in game.
-    lethal_movement  = 1.0      # Moving in/out of lethal range.
+    lethal_movement  = 2.0      # Moving in/out of lethal range.
     coin_movement    = 0.25     # Moving closer to/further from closest coin.
     crate_movement   = 0.1      # Moving closer to/further from best crate position.
     loop_factor      = -0.1     # Scale factor for loop penalty.
