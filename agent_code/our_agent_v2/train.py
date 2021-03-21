@@ -22,12 +22,12 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 30000 # Keep only ... last transitions.
-BATCH_SIZE              = 20000 # Size of batch in TD-learning.
-TRAIN_FREQ              = 25    # Train model every ... game.
+TRANSITION_HISTORY_SIZE = 5000 # Keep only ... last transitions.
+BATCH_SIZE              = 3000 # Size of batch in TD-learning.
+TRAIN_FREQ              = 5    # Train model every ... game.
 
 # N-step TD Q-learning:
-GAMMA   = 0.85  # Discount factor.
+GAMMA   = 0.8  # Discount factor.
 N_STEPS = 5    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
@@ -51,7 +51,7 @@ TAU_MIN   = 0.5
 TAU_DECAY = 0.999
 
 # Auxilary:
-PLOT_FREQ = 100
+PLOT_FREQ = 25
 # -----------------------------------------------------------------------------
 
 # File name of historical training record used for plotting.
@@ -329,8 +329,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             targets = [targets[i] for i in list(idx)]
 
         # Regression fit.
-        self.model.fit(X, targets) 
-        #self.model.partial_fit(X, targets)
+        #self.model.fit(X, targets) 
+        self.model.partial_fit(X, targets)
         self.model_is_fitted = True
 
         # Raise flag for export of the learned model.
