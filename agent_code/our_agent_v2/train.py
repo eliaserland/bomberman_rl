@@ -22,9 +22,9 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 5000 # Keep only ... last transitions.
-BATCH_SIZE              = 3000 # Size of batch in TD-learning.
-TRAIN_FREQ              = 5    # Train model every ... game.
+TRANSITION_HISTORY_SIZE = 20000 # Keep only ... last transitions.
+BATCH_SIZE              = 2000  # Size of batch in TD-learning.
+TRAIN_FREQ              = 3     # Train model every ... game.
 
 # N-step TD Q-learning:
 GAMMA   = 0.8  # Discount factor.
@@ -32,7 +32,7 @@ N_STEPS = 5    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
 PRIO_EXP_REPLAY = True                # Toggle on/off.
-PRIO_EXP_SIZE   = int(0.5*BATCH_SIZE) # Size of the chosen subset of TS.
+PRIO_EXP_SIZE   = int(0.25*BATCH_SIZE) # Size of the chosen subset of TS.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
@@ -41,8 +41,8 @@ DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
-EXPLORATION_INIT  = 0.8
-EXPLORATION_MIN   = 0.15
+EXPLORATION_INIT  = 1.0
+EXPLORATION_MIN   = 0.2
 EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 < tau < infty)
@@ -139,7 +139,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
-    self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    
 
 
         # TODO: NEED TO PREVENT LOOPS
@@ -267,6 +267,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.score_in_round += reward_from_events(self, events)
 
 
+    self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+
+
+
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """
     Called at the end of each game or when the agent died to hand out final rewards.
@@ -279,7 +283,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     :param self: The same object that is passed to all of your callbacks.
     """
-    self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
+    
     
     # ---------- (1) Compute last n-step reward and store tuple in Transitions ----------
     self.n_step_transitions.append((transform(self, last_game_state), last_action, None, reward_from_events(self, events)))
@@ -367,6 +371,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
         # Raise flag for export of the learned model.
         self.perform_export = True
+
+        self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
     # ---------- (4) Improve dimensionality reduction: ----------
     # Learn a new (hopefully improved) model for dimensionality reduction.
@@ -485,7 +491,7 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    passive_constant = -0.1     # Always added to rewards for every step in game.
+    passive_constant = -1     # Always added to rewards for every step in game.
     lethal_movement  = 2.0      # Moving in/out of lethal range.
     coin_movement    = 0.25     # Moving closer to/further from closest coin.
     crate_movement   = 0.1      # Moving closer to/further from best crate position.
@@ -519,7 +525,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
 
-        e.CRATE_DESTROYED: 1,
+        e.CRATE_DESTROYED: 0.5,
         e.COIN_FOUND: 0.2,
         e.COIN_COLLECTED: 5,
 

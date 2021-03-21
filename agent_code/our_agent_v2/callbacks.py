@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_tokyo_drift"  # Base filename of model (excl. extensions).
+FILENAME = "crates_nightrun"  # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -111,7 +111,7 @@ def act(self, game_state: dict) -> str:
         if self.train:
             random_prob = self.epsilon
         else:
-            random_prob = 0.01 # TODO: Hyper-parameter which needs optimization.    
+            random_prob = 0.1 # TODO: Hyper-parameter which needs optimization.    
         if random.random() < random_prob or not self.model_is_fitted:
             self.logger.debug("Choosing action uniformly at random.")
             execute_action = np.random.choice(valid_actions)
