@@ -41,9 +41,9 @@ DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
-EXPLORATION_INIT  = 1.0
+EXPLORATION_INIT  = 0.8
 EXPLORATION_MIN   = 0.15
-EXPLORATION_DECAY = 0.9999
+EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 < tau < infty)
 TAU_INIT  = 15
@@ -141,7 +141,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
+
+        # TODO: NEED TO PREVENT LOOPS
+        
+        # TODO: Rethink all rewards.
+
+        # TODO: Rethink the size of transition history, batch size and prio batch size. (perhaps even make it variable?)
+
+        # TODO: See if there are more, smarter rewards to give.
+
+        # TODO: Need to optimize the regularization in the regression fit.
+
+
     # ---------- (1) Add own events to hand out rewards: ----------
+    # If the old state is not before the beginning of the game:
     if old_game_state:
         # Extract feature vector:
         state_old = state_to_features(old_game_state)
@@ -161,49 +174,36 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if not any(lethal_directions == 1):
                 events.append(WAITED_UNNECESSARILY)
         
-        # Incur penalty by bombs laid repeatedly on the same set of squares.
-        # Penalty scales quadratically by the number of repeated bombings.
-        if self_action == 'BOMB':    
+        # If bomb was dropped:
+        if self_action == 'BOMB':
+            # Incur penalty by bombs laid repeatedly on the same squares.
+            # Scales quadratically by the no. of repeated bombings.
             self.bomb_history.append((x, y))
             _, counts = np.unique(self.bomb_history, return_counts=True)
             self.bomb_loop_penalty = np.sum((counts-1)**2)
             if self.bomb_loop_penalty > 0:
                 events.append(ALREADY_BOMBED_FIELD)
         
-        # Punish if bomb was placed in a position where escape was impossible.
-        inescapable = state_old[0,1] == 0
-        if inescapable and self_action == 'BOMB':
-            events.append(CERTAIN_SUICIDE)
+            # Punish if bomb was placed in a position where escape was impossible.
+            inescapable = state_old[0,1] == 0
+            if inescapable:
+                events.append(CERTAIN_SUICIDE)
 
-        # TODO: NEED TO PREVENT LOOPS
-
-        # TODO: Improve determination of best crate position. Make the selection
-        #       rule of distance vs. crate quantity clearar and more decisive.
-
-        # TODO: Non-normalize the direction vectors for coins and crates, make
-        #       them point in the exact direction for the next step, not bird's way direction.
-        
-        # TODO: Rethink all rewards.
-
-        # TODO: Rethink the size of transition history, batch size and prio batch size. (perhaps even make it variable?)
-
-        # TODO: See if there are more, smarter rewards to give. 
-
-        # TODO: Need to optimize the regularization in the regression fit.
-
-        # If bomb was dropped:
-        if self_action == 'BOMB':
+            # Bombing of crates:
             crate_step_old = state_old[0,8]
-            # Give reward if the agent was at the optimum crate-destroying position.
             if crate_step_old == 0:
+                # Give reward if the agent was at the optimal crate-destroying position.
                 events.append(BOMBED_CRATE_GOAL)
-            # Give penalty if the optimum position was not yet reached.
             elif crate_step_old > 0:
+                # Give penalty if the optimal position was not yet reached.
                 events.append(BOMBED_TOO_EARLY)
-            # Give penalty if no crates was in range.
             elif crate_step_old == -1:
+                # Give penalty if no crates was in range, but bomb was laid anyway.
                 events.append(BOMBED_NO_CRATES)
 
+            # TODO: Bombing of other agents:
+
+        # If the new state is not after the end of the game:
         if new_game_state:
             # Extract feature vector:
             state_new = state_to_features(new_game_state)

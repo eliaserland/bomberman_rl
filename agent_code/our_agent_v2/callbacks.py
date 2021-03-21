@@ -16,7 +16,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_trial_long_v2"  # Base filename of model (excl. extensions).
+FILENAME = "crates_tokyo_drift"  # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -193,11 +193,11 @@ def state_to_features(game_state: dict) -> np.array:
     # ---- COINS ----
     # Normalized vector indicating the direction of the closest coin and the no.
     # of steps to get there
-    coin_dir = closest_coin_dir(x, y, coins)
+    coin_dir = closest_coin_dir(x, y, coins, arena, bombs, others)
 
     # ---- CRATES ----
     # Find tile within a specified radius which can be reached by agent and destroyes the most crates
-    crates_direction = crates_dir(x, y, 10, arena, bombs, others)
+    crates_direction = crates_dir(x, y, 30, arena, bombs, others)
 
     # ---- ESCAPE FROM BOMB ----
     # Agent can escape from its own bomb, if placed at its current position.
@@ -217,7 +217,7 @@ def state_to_features(game_state: dict) -> np.array:
     features = np.concatenate((scalar_feat, coin_dir, crates_direction, escape_direction), axis=None)
     # [bombs_left, escapable, lethal, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step, escape_x, escape_y]
     # [         0,         1,      2,      3,      4,         5,       6,       7,          8,        9,       10]
-    return features.reshape(1,-1)
+    return features.reshape(1, -1)
 
 # ---- Potentials ----
 def gaussian(x: np.array, y: np.array, sigma: float=1, height: float=1) -> np.array:
@@ -230,23 +230,49 @@ def inv_squared(x: np.array, y: np.array, height: float=1) -> np.array:
     return height*1/(1+x**2+y**2)
 # --------------------
 
-def closest_coin_dir(x: int, y: int, coins: list) -> np.array:
+def closest_coin_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, others: list) -> np.array:
     """
+    # TODO: Outdated function description, redo.
     Given the agent's position at (x,y) get the normalized position vector
     towards the closest revealed coin and the l1 distance to this coin. Returns
     the zero vector with -1 as the l1 distance if no coins are present.
     """
+    reachable = False # initialization
     if coins:
-        l1_dist = []
-        for cx, cy in coins:
-            l1_dist.append(abs(cx-x)+abs(cy-y))
-        (cx, cy), l1 = coins[np.argmin(l1_dist)], np.min(l1_dist) 
-        rel_pos = (cx-x, cy-y)
-        if rel_pos != (0, 0):
-            rel_dir = rel_pos / l1
-            return np.concatenate((rel_dir, l1), axis=None)
-        else:
-            return np.zeros(3)
+        # Perform a breadth-first search for the closest coin.
+        q = Queue()
+        visited = []
+        graph = {}  
+        root = ((x, y), 0, (None, None)) # ((x, y), steps, (parent_x, parent_y))
+        visited.append(root[0])
+        q.put(root)
+        while not q.empty():
+            (ix, iy), steps, parent = q.get()
+            graph[(ix, iy)] = parent
+            if (ix, iy) in coins:
+                reachable = True
+                cx, cy, c_steps = ix, iy, steps
+                break
+            neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
+            for neighb in neighbours:
+                if not neighb in visited:
+                    visited.append(neighb)
+                    q.put((neighb, steps+1, (ix, iy)))
+        if reachable:
+            # Traverse graph backwards to recover the path to the closest coin.
+            s = []          # empty sequence
+            node = (cx, cy) # target node
+            if graph[node] != (None, None) or node == (x, y):
+                while node != (None, None):
+                    s.insert(0, node)  # insert at the front of the sequence
+                    node = graph[node] # get the parent node
+            # Assignment of direction towards the coin.
+            if len(s) > 1:
+                next_node = s[1] # The very next node on path towards the coin.
+                rel_pos = (next_node[0]-x, next_node[1]-y)
+                return np.concatenate((rel_pos, c_steps), axis=None)
+            else:
+                return np.zeros(3)
     return np.array([0, 0, -1])
 
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
@@ -361,7 +387,7 @@ def is_escapable(x: int, y: int, arena: np.array) -> bool:
 
 def get_free_neighbours(x: int, y: int, arena: np.array, bombs: list, others: list) -> list:
     """
-    Get a list of all free and unoccupied tiles directly neighbouring the 
+    Get a list of all free and unoccupied tiles directly neighbouring the
     position with indices (x,y).
     """
     directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
@@ -380,16 +406,20 @@ def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np
     tile. Returns a normalized vector indicating the direction. Returns the zero
     vector if the bombs cannot be escaped or if there are no active bombs.
     """
+    # TODO: Update with direction to closest tile
+
     escapable = False # initialization
     if bombs:
         # Breadth-first search for the closest non-lethal position.
         q = Queue()  # Create a queue.
         visited = [] # List to keep track of visited positions.
-        root = (x,y)
-        visited.append(root)
-        q.put(root)
-        while not q.empty():
-            ix, iy = q.get()
+        graph = {}   # Saving node-parent relationships.
+        root = ((x, y), (None, None)) # ((x, y), (parent_x, parent_y))
+        visited.append(root[0])       # Mark as visited.
+        q.put(root)                   # Put in queue.
+        while not q.empty():             
+            (ix, iy), parent = q.get()              
+            graph[(ix, iy)] = parent
             if not is_lethal(ix, iy, arena, bombs):
                 escapable = True
                 break
@@ -397,11 +427,20 @@ def escape_dir(x: int, y: int, arena: np.array, bombs: list, others: list) -> np
             for neighbour in neighbours:
                 if not neighbour in visited:
                     visited.append(neighbour)
-                    q.put(neighbour)
+                    q.put((neighbour, (ix, iy)))
         if escapable:
-            rel_pos = (ix-x, iy-y)
-            if rel_pos != (0, 0):
-                return rel_pos / np.linalg.norm(rel_pos, ord=1)
+            # Traverse the graph backwards from the target node to the source node.
+            s = []          # empty sequence
+            node = (ix, iy) # target node
+            if graph[node] != (None, None) or node == (x, y):
+                while node != (None, None):
+                    s.insert(0, node)  # Insert at the front of the sequence.
+                    node = graph[node] # Get the parent.
+            # Assigning a direction towards the escape tile.
+            if len(s) > 1:
+                next_node = s[1] # The very next node towards the escape tile.
+                rel_pos = (next_node[0]-x, next_node[1]-y)
+                return np.array(rel_pos)
     return np.zeros(2)
 
 
@@ -414,43 +453,56 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
     step count if no crates could be found within the n step radius.
     """
     candidates = [] 
-    alpha = 0.2 # Weighing the importance of short distance to no. of crates.
-                 # alpha -> 0   : only considering no. of crates
-                 # alpha -> inf : only considering shortest distance
-
+   
     # Breadth-first search for the tile with most effective bomb placement.
     q = Queue()
-    visited = []
-    root = ((x, y), 0) # ((x, y), steps)
-    visited.append(root[0])
-    q.put(root)
+    visited, graph = [], {}
+    root = ((x, y), 0, (None, None)) # ((x, y), steps, (parent_x, parent_y))
+    visited.append(root[0]) # Keeping track of visited nodes.
+    q.put(root)             
     while not q.empty():
-        (ix, iy), steps = q.get()
-        if steps > n:
+        (ix, iy), steps, parent = q.get() # Taking the next node from the queue.
+        if steps > n:                     # Stop condition.
             continue
+        graph[(ix, iy)] = parent          # Save the node with its parent.
+        
+        # Determine no. of destructible crates and escape status.
         crates = destructible_crates(ix, iy, arena)
         if crates > 0 and is_escapable(ix, iy, arena):
             candidates.append((crates, steps, (ix, iy)))
+        
+        # Traversing to the neighbouring nodes.
         neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
         for neighb in neighbours:
             if not neighb in visited:
                 visited.append(neighb)
-                q.put((neighb, steps+1))
+                q.put((neighb, steps+1, (ix, iy)))
+    
     if candidates:
+        # Finding the best tile from the candidates.
         w_max = 0
         for crates, steps, (ix, iy) in candidates:
-            w = crates * np.exp(-alpha*steps)
+            w = crates/(4+steps) # Average no. of destroyed crates per step.
             if w > w_max:
                 w_max = w
                 cx, cy, c_steps = ix, iy, steps
-        rel_pos = (cx-x, cy-y)
-        if rel_pos != (0, 0):
-            rel_dir = rel_pos / np.linalg.norm(rel_pos, ord=1) 
-            return np.concatenate((rel_dir, c_steps), axis=None)
+        
+        # Traverse the graph backwards from the target node to the source node.
+        s = []          # empty sequence
+        node = (cx, cy) # target node
+        if graph[node] != (None, None) or node == (x, y):
+            while node != (None, None):
+                s.insert(0, node)  # Insert at the front of the sequence.
+                node = graph[node] # Get the parent.
+
+        # Assigning a direction and distance to the tile.
+        if len(s) > 1:
+            next_node = s[1] # The very next node towards the best tile.
+            rel_pos = (next_node[0]-x, next_node[1]-y)
+            return np.concatenate((rel_pos, c_steps), axis=None)
         else:
             return np.zeros(3)
     return np.array([0, 0, -1])
-
 
 def get_valid_action(game_state: dict):
     """
