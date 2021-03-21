@@ -68,6 +68,9 @@ CLOSER_TO_CRATE = "CLOSER_TO_CRATE"
 FURTHER_FROM_CRATE = "FURTHER_FROM_CRATE"
 CERTAIN_SUICIDE = "CERTAIN_SUICIDE"
 WAITED_UNNECESSARILY = "WAITED_UNNECESSARILY"
+BOMBED_CRATE_GOAL = "BOMBED_CRATE_GOAL"
+BOMBED_TOO_EARLY = "BOMBED_TOO_EARLY"
+BOMBED_NO_CRATES = "BOMBED_NO_CRATES"
 
 def setup_training(self):
     """
@@ -142,22 +145,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if old_game_state:
         # Extract feature vector:
         state_old = state_to_features(old_game_state)
-        
-        # Incur penalty by bombs laid repeatedly on the same set of squares.
-        # Penalty scales quadratically by the number of repeated bombings.
         _, _, _, (x, y) = old_game_state['self']
-        if self_action == 'BOMB':    
-            self.bomb_history.append((x, y))
-            _, counts = np.unique(self.bomb_history, return_counts=True)
-            self.bomb_loop_penalty = np.sum((counts-1)**2)
-            if self.bomb_loop_penalty > 0:
-                events.append(ALREADY_BOMBED_FIELD)
-
-        # Punish if bomb was placed in a position where escape was impossible.
-        inescapable = state_old[0,1] == 0
-        if inescapable and self_action == 'BOMB':
-            events.append(CERTAIN_SUICIDE)
-
+       
         # Punish if agent chose to wait, but no tile in its surrounding was lethal.
         if self_action == 'WAIT':
             arena_old = old_game_state['field']
@@ -171,6 +160,49 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     lethal_directions[i] = -1
             if not any(lethal_directions == 1):
                 events.append(WAITED_UNNECESSARILY)
+        
+        # Incur penalty by bombs laid repeatedly on the same set of squares.
+        # Penalty scales quadratically by the number of repeated bombings.
+        if self_action == 'BOMB':    
+            self.bomb_history.append((x, y))
+            _, counts = np.unique(self.bomb_history, return_counts=True)
+            self.bomb_loop_penalty = np.sum((counts-1)**2)
+            if self.bomb_loop_penalty > 0:
+                events.append(ALREADY_BOMBED_FIELD)
+        
+        # Punish if bomb was placed in a position where escape was impossible.
+        inescapable = state_old[0,1] == 0
+        if inescapable and self_action == 'BOMB':
+            events.append(CERTAIN_SUICIDE)
+
+        # TODO: NEED TO PREVENT LOOPS
+
+        # TODO: Improve determination of best crate position. Make the selection
+        #       rule of distance vs. crate quantity clearar and more decisive.
+
+        # TODO: Non-normalize the direction vectors for coins and crates, make
+        #       them point in the exact direction for the next step, not bird's way direction.
+        
+        # TODO: Rethink all rewards.
+
+        # TODO: Rethink the size of transition history, batch size and prio batch size. (perhaps even make it variable?)
+
+        # TODO: See if there are more, smarter rewards to give. 
+
+        # TODO: Need to optimize the regularization in the regression fit.
+
+        # If bomb was dropped:
+        if self_action == 'BOMB':
+            crate_step_old = state_old[0,8]
+            # Give reward if the agent was at the optimum crate-destroying position.
+            if crate_step_old == 0:
+                events.append(BOMBED_CRATE_GOAL)
+            # Give penalty if the optimum position was not yet reached.
+            elif crate_step_old > 0:
+                events.append(BOMBED_TOO_EARLY)
+            # Give penalty if no crates was in range.
+            elif crate_step_old == -1:
+                events.append(BOMBED_NO_CRATES)
 
         if new_game_state:
             # Extract feature vector:
@@ -472,6 +504,9 @@ def reward_from_events(self, events: List[str]) -> int:
         FURTHER_FROM_CRATE: -crate_movement,
         CERTAIN_SUICIDE: -5,
         WAITED_UNNECESSARILY: -0.5,
+        BOMBED_CRATE_GOAL: 1,
+        BOMBED_TOO_EARLY: -0.2,
+        BOMBED_NO_CRATES: -0.2,
         
         # Default events:
         e.MOVED_LEFT: 0,
@@ -481,7 +516,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.WAITED: 0,
         e.INVALID_ACTION: -1,
         
-        e.BOMB_DROPPED: 0.5,
+        e.BOMB_DROPPED: 0,
         e.BOMB_EXPLODED: 0,
 
         e.CRATE_DESTROYED: 1,
