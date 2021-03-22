@@ -13,8 +13,11 @@ from sklearn.base import clone
 
 import settings as s
 import events as e
-from .callbacks import (transform, state_to_features, state_to_vect, has_object,
+from .callbacks import (transform, state_to_features, has_object,
                         is_lethal, fname, FILENAME)
+
+# TODO: REMOVE ALL MENTIONS OF state_to_vect.
+
 
 # Transition tuple. (s, a, r, s')
 Transition = namedtuple('Transition',
@@ -22,12 +25,12 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 20000 # Keep only ... last transitions.
+TRANSITION_HISTORY_SIZE = 4000 # Keep only ... last transitions.
 BATCH_SIZE              = 2000  # Size of batch in TD-learning.
-TRAIN_FREQ              = 3     # Train model every ... game.
+TRAIN_FREQ              = 2     # Train model every ... game.
 
 # N-step TD Q-learning:
-GAMMA   = 0.8  # Discount factor.
+GAMMA   = 0.95  # Discount factor.
 N_STEPS = 5    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
@@ -42,7 +45,7 @@ DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
 EXPLORATION_INIT  = 1.0
-EXPLORATION_MIN   = 0.2
+EXPLORATION_MIN   = 0.33
 EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 < tau < infty)
@@ -282,9 +285,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward, after_n_step_new_state))
 
     # ---------- (3) Store the game state for feature extration function learning: ----------
-    # Store the game state for learning of feature extration function.    
+    # Store the game state for learning of feature extration function.
     if old_game_state and not self.dr_override:
-        self.state_history.append(state_to_vect(old_game_state)[0])
+        self.state_history.append(state_to_features(old_game_state)[0])
 
     # ---------- (4) For evaluation purposes: ----------
     if 'COIN_COLLECTED' in events:
@@ -327,7 +330,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     
     # Store the game state for learning of feature extration function.
     if last_game_state and not self.dr_override:
-        self.state_history.append(state_to_vect(last_game_state)[0])
+        self.state_history.append(state_to_features(last_game_state)[0])
 
     # ---------- (2) Decrease the exploration rate: ----------
     if len(self.transitions) > BATCH_SIZE:
@@ -387,12 +390,12 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             # Keep the N samples with the largest squared residuals.
             idx = np.argpartition(residuals, -PRIO_EXP_SIZE)[-PRIO_EXP_SIZE:]
 
-            # Update the training set.            
+            # Update the training set.
             X = [X[i] for i in list(idx)]
             targets = [targets[i] for i in list(idx)]
 
         # Regression fit.
-        #self.model.fit(X, targets) 
+        #self.model.fit(X, targets)
         self.model.partial_fit(X, targets)
         self.model_is_fitted = True
 
