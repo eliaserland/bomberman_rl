@@ -72,6 +72,7 @@ BOMBED_CRATE_GOAL = "BOMBED_CRATE_GOAL"
 BOMBED_TOO_EARLY = "BOMBED_TOO_EARLY"
 BOMBED_NO_CRATES = "BOMBED_NO_CRATES"
 DID_NOT_BOMB_GOAL = "DID_NOT_BOMB_GOAL"
+OSCILLATION = "OSCILLATION"
 
 def setup_training(self):
     """
@@ -84,6 +85,7 @@ def setup_training(self):
     # Ques to store the transition tuples and coordinate history of agent.
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
     self.bomb_history = deque([], 5)                    # short term memory of bomb placements by agent.
+    self.coordinate_history = deque([], 4)
     self.n_step_transitions = deque([], N_STEPS)
     
     # Storage of states for feature extration function learning.
@@ -161,7 +163,24 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         state_old = state_to_features(old_game_state)
         _, _, _, (x, y) = old_game_state['self']
        
+        # Check if coordinate sequence is stricly alterating between two tiles.
+        self.coordinate_history.append((x, y))        
+        if len(self.coordinate_history) == 4:
+            unique_coords = np.unique(self.coordinate_history)
+            if len(unique_coords) == 2: # Requires maxlen=4 for coordinate_history deque.
+                is_different = []
+                for i in range(len(self.coordinate_history)-1):
+                    comparison = self.coordinate_history[i] != self.coordinate_history[i+1]
+                    is_different.append(comparison)
+                if all(is_different):
+                    events.append(OSCILLATION)
+
+        # TODO: Punish for waiting when in lethal region.
+
+
+
         # Punish if agent chose to wait, but no tile in its surrounding was lethal.
+        # TODO: Check if agent could move to another non-lethal tile
         if self_action == 'WAIT':
             arena_old = old_game_state['field']
             bombs_old = [xy for (xy, t) in old_game_state['bombs']]
@@ -176,8 +195,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(WAITED_UNNECESSARILY)
         
         # Reached the optimal bomb-laying position, but did not drop bomb.
-        crate_step_old = state_old[0,8]
-        if self_action != 'BOMB' and crate_step_old == 0:
+        bomb_is_possible = state_old[0,0] == 1
+        crate_steps_old = state_old[0,8]
+        if bomb_is_possible and self_action != 'BOMB' and crate_steps_old == 0:
             events.append(DID_NOT_BOMB_GOAL)
 
 
@@ -197,14 +217,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(CERTAIN_SUICIDE)
 
             # Bombing of crates:
-            crate_step_old = state_old[0,8]
-            if crate_step_old == 0:
+            crate_steps_old = state_old[0,8]
+            if crate_steps_old == 0:
                 # Give reward if the agent was at the optimal crate-destroying position.
                 events.append(BOMBED_CRATE_GOAL)
-            elif crate_step_old > 0:
+            elif crate_steps_old > 0:
                 # Give penalty if the optimal position was not yet reached.
                 events.append(BOMBED_TOO_EARLY)
-            elif crate_step_old == -1:
+            elif crate_steps_old == -1:
                 # Give penalty if no crates was in range, but bomb was laid anyway.
                 events.append(BOMBED_NO_CRATES)
 
@@ -521,6 +541,7 @@ def reward_from_events(self, events: List[str]) -> int:
         BOMBED_TOO_EARLY: -0.2,
         BOMBED_NO_CRATES: -0.2,
         DID_NOT_BOMB_GOAL: -1,
+        OSCILLATION: -1,
         
         # Default events:
         e.MOVED_LEFT: 0,
