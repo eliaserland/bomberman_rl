@@ -16,8 +16,8 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_new_rewards"  # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'eps-greedy'        # Options: 'softmax', 'eps-greedy'
+FILENAME = "crates_new_rewards_v4"  # Base filename of model (excl. extensions).
+ACT_STRATEGY = 'eps-greedy'         # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.

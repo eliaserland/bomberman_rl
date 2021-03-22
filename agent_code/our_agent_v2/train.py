@@ -27,7 +27,7 @@ Transition = namedtuple('Transition',
 # General hyper-parameters:
 TRANSITION_HISTORY_SIZE = 4000  # Keep only ... last transitions.
 BATCH_SIZE              = 2000  # Size of batch in TD-learning.
-TRAIN_FREQ              = 2     # Train model every ... game.
+TRAIN_FREQ              = 5     # Train model every ... game.
 
 # N-step TD Q-learning:
 GAMMA   = 0.95  # Discount factor.
@@ -45,7 +45,7 @@ DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
 EXPLORATION_INIT  = 1.0
-EXPLORATION_MIN   = 0.33
+EXPLORATION_MIN   = 0.2
 EXPLORATION_DECAY = 0.999
 
 # Softmax: (0 < tau < infty)
