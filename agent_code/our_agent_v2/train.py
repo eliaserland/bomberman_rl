@@ -71,6 +71,7 @@ WAITED_UNNECESSARILY = "WAITED_UNNECESSARILY"
 BOMBED_CRATE_GOAL = "BOMBED_CRATE_GOAL"
 BOMBED_TOO_EARLY = "BOMBED_TOO_EARLY"
 BOMBED_NO_CRATES = "BOMBED_NO_CRATES"
+DID_NOT_BOMB_GOAL = "DID_NOT_BOMB_GOAL"
 
 def setup_training(self):
     """
@@ -174,6 +175,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if not any(lethal_directions == 1):
                 events.append(WAITED_UNNECESSARILY)
         
+        # Reached the optimal bomb-laying position, but did not drop bomb.
+        crate_step_old = state_old[0,8]
+        if self_action != 'BOMB' and crate_step_old == 0:
+            events.append(DID_NOT_BOMB_GOAL)
+
+
         # If bomb was dropped:
         if self_action == 'BOMB':
             # Incur penalty by bombs laid repeatedly on the same squares.
@@ -491,7 +498,7 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    passive_constant = -1     # Always added to rewards for every step in game.
+    passive_constant = 0        # Always added to rewards for every step in game.
     lethal_movement  = 2.0      # Moving in/out of lethal range.
     coin_movement    = 0.25     # Moving closer to/further from closest coin.
     crate_movement   = 0.1      # Moving closer to/further from best crate position.
@@ -513,6 +520,7 @@ def reward_from_events(self, events: List[str]) -> int:
         BOMBED_CRATE_GOAL: 1,
         BOMBED_TOO_EARLY: -0.2,
         BOMBED_NO_CRATES: -0.2,
+        DID_NOT_BOMB_GOAL: -1,
         
         # Default events:
         e.MOVED_LEFT: 0,
