@@ -25,7 +25,7 @@ Transition = namedtuple('Transition',
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 4000 # Keep only ... last transitions.
+TRANSITION_HISTORY_SIZE = 4000  # Keep only ... last transitions.
 BATCH_SIZE              = 2000  # Size of batch in TD-learning.
 TRAIN_FREQ              = 2     # Train model every ... game.
 
@@ -76,6 +76,8 @@ BOMBED_TOO_EARLY = "BOMBED_TOO_EARLY"
 BOMBED_NO_CRATES = "BOMBED_NO_CRATES"
 DID_NOT_BOMB_GOAL = "DID_NOT_BOMB_GOAL"
 OSCILLATION = "OSCILLATION"
+CLOSER_TO_ESCAPE = "CLOSER_TO_ESCAPE"
+FURTHER_FROM_ESCAPE = "FURTHER_FROM_ESCAPE"
 
 def setup_training(self):
     """
@@ -166,22 +168,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         state_old = state_to_features(old_game_state)
         _, _, _, (x, y) = old_game_state['self']
        
+        # ---- SMALL MOVEMENT LOOP PREVENTION ----
         # Check if coordinate sequence is stricly alterating between two tiles.
-        self.coordinate_history.append((x, y))        
+        self.coordinate_history.append((x, y))
         if len(self.coordinate_history) == 4:
-            unique_coords = np.unique(self.coordinate_history)
+            unique_coords = np.unique(self.coordinate_history, axis=0)
             if len(unique_coords) == 2: # Requires maxlen=4 for coordinate_history deque.
-                is_different = []
+                is_different = []       # For pair-wise comparison.
                 for i in range(len(self.coordinate_history)-1):
                     comparison = self.coordinate_history[i] != self.coordinate_history[i+1]
                     is_different.append(comparison)
                 if all(is_different):
                     events.append(OSCILLATION)
 
-        # TODO: Punish for waiting when in lethal region.
-
-
-
+        # ---- UNNECESSARY WAITING ----
         # Punish if agent chose to wait, but no tile in its surrounding was lethal.
         # TODO: Check if agent could move to another non-lethal tile
         if self_action == 'WAIT':
@@ -197,28 +197,44 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if not any(lethal_directions == 1):
                 events.append(WAITED_UNNECESSARILY)
         
+        # ---- MOVEMENT WHEN IN LETHAL ----
+        # Reward for following/punishment for not following the escape direction.
+        islethal_old = state_old[0,2] == 1
+        if islethal_old: # When in the lethal region:
+            escape_dir_old = state_old[0,9:11]
+            if ((all(escape_dir_old == ( 0, 1)) and self_action == 'DOWN' ) or
+                (all(escape_dir_old == ( 1, 0)) and self_action == 'RIGHT') or
+                (all(escape_dir_old == ( 0,-1)) and self_action == 'UP'   ) or
+                (all(escape_dir_old == (-1, 0)) and self_action == 'LEFT' )):
+                events.append(CLOSER_TO_ESCAPE)
+            else:
+                events.append(FURTHER_FROM_ESCAPE)
+
+        # ---- CRATE BOMBING ENCOURAGEMENT ----
         # Reached the optimal bomb-laying position, but did not drop bomb.
         bomb_is_possible = state_old[0,0] == 1
         crate_steps_old = state_old[0,8]
         if bomb_is_possible and self_action != 'BOMB' and crate_steps_old == 0:
             events.append(DID_NOT_BOMB_GOAL)
 
-
         # If bomb was dropped:
         if self_action == 'BOMB':
+            # ---- BOMB LOOP PREVENTION ----
             # Incur penalty by bombs laid repeatedly on the same squares.
             # Scales quadratically by the no. of repeated bombings.
             self.bomb_history.append((x, y))
-            _, counts = np.unique(self.bomb_history, return_counts=True)
+            _, counts = np.unique(self.bomb_history, axis=0, return_counts=True)
             self.bomb_loop_penalty = np.sum((counts-1)**2)
             if self.bomb_loop_penalty > 0:
                 events.append(ALREADY_BOMBED_FIELD)
         
+            # ---- SUICIDE PREVENTION ----
             # Punish if bomb was placed in a position where escape was impossible.
             inescapable = state_old[0,1] == 0
             if inescapable:
                 events.append(CERTAIN_SUICIDE)
 
+            # ---- CRATE BOMBING ----
             # Bombing of crates:
             crate_steps_old = state_old[0,8]
             if crate_steps_old == 0:
@@ -231,13 +247,18 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 # Give penalty if no crates was in range, but bomb was laid anyway.
                 events.append(BOMBED_NO_CRATES)
 
+
+
             # TODO: Bombing of other agents:
+
+
 
         # If the new state is not after the end of the game:
         if new_game_state:
             # Extract feature vector:
             state_new = state_to_features(new_game_state)
 
+            # ---- LETHAL STATUS CHANGE ----
             # The agent's lethal status at its position in each game state.
             lethal_new = state_new[0,2]
             lethal_old = state_old[0,2]
@@ -246,19 +267,24 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             elif lethal_old > lethal_new:
                 events.append(ESCAPED_LETHAL)
 
+            # ---- COIN MOVEMENT ----
             # Closer to/further from the closest coin.
             coin_step_new = state_new[0,5]
             coin_step_old = state_old[0,5]
-            if coin_step_new != -1 and coin_step_old != -1:
+            if (coin_step_new != -1 and # Only consider reward if the coin distance
+                coin_step_old != -1):   # can be compared between two states.
                 if coin_step_old > coin_step_old:
                     events.append(CLOSER_TO_COIN)
                 elif coin_step_old < coin_step_new:
                     events.append(FURTHER_FROM_COIN)
 
+            # ---- CRATE MOVEMENT ----
             # Closer to/further from best crate position.
             crate_step_new = state_new[0,8]
             crate_step_old = state_old[0,8]
-            if crate_step_new != -1 and crate_step_old != -1:
+            if (bomb_is_possible and        # Only if bombing is available.
+                crate_step_new != -1 and    # Not if no crates could be found.
+                crate_step_old != -1):
                 if crate_step_old > crate_step_new:
                     events.append(CLOSER_TO_CRATE)
                 elif crate_step_old < crate_step_new:
@@ -521,52 +547,97 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
-    passive_constant = 0        # Always added to rewards for every step in game.
-    lethal_movement  = 2.0      # Moving in/out of lethal range.
-    coin_movement    = 0.25     # Moving closer to/further from closest coin.
-    crate_movement   = 0.1      # Moving closer to/further from best crate position.
-    loop_factor      = -0.1     # Scale factor for loop penalty.
+    
+    # escape > kill > coin > crate
+    
+    # Base rewards:
+    kill  = s.REWARD_KILL
+    coin  = s.REWARD_COIN
+    #crate = 0.1 * coin
+
+    passive = 0 # Always added to rewards for every step in game.
+
+    loop_factor = -0.1     # Scale factor for loop penalty.
+
+
+    # --- re-weighing the rewards ---
+    # Moving in/out of lethal range.
+    lethal_change = 0.5 * kill
+    
+    # Step in escape direction
+    lethal_movm   = 0.25 * lethal_change
+
+    # Step towards the closest coin.
+    coin_movm =  0.75 * (lethal_movm - 0.25*coin) # coin_movm < (lethal_movm - 0.25*coin) 
+
+    # Step towards the best crate-destroying position.
+    crate_movm = 0.5 * coin_movm # (coin_movm + 0.25*coin - 0.25 * 10 * crate)
+
+    crate = 0.75 * 0.1 * (coin + 4 * (coin_movm - crate_movm))
+
+    early_no_crates = -(4*lethal_movm + lethal_change)  # Must be a strict equality, do not alter
+    crate_goal = -early_no_crates
+
+    avoided_crate_goal = 0.5 * (-4*(coin_movm - crate_movm) - coin)
 
     # Game reward dictionary:
     game_rewards = {
-        # Custom events:
-        SURVIVED_STEP:  passive_constant,
-        ALREADY_BOMBED_FIELD: loop_factor * self.bomb_loop_penalty,
-        ENTERED_LETHAL: -lethal_movement,
-        ESCAPED_LETHAL: lethal_movement,
-        CLOSER_TO_COIN: coin_movement,
-        FURTHER_FROM_COIN: -coin_movement,
-        CLOSER_TO_CRATE: crate_movement,
-        FURTHER_FROM_CRATE: -crate_movement,
-        CERTAIN_SUICIDE: -5,
+        # ---- CUSTOM EVENTS ----
+        # lethal movement
+        ESCAPED_LETHAL      : lethal_change,
+        ENTERED_LETHAL      : -lethal_change,
+        CLOSER_TO_ESCAPE    : lethal_movm,
+        FURTHER_FROM_ESCAPE : -lethal_movm,
+
+        # coin movement
+        CLOSER_TO_COIN      : coin_movm,
+        FURTHER_FROM_COIN   : -coin_movm,
+        
+        # crate movement
+        CLOSER_TO_CRATE     : crate_movm,
+        FURTHER_FROM_CRATE  : -crate_movm,
+        
+        # bombing
+        BOMBED_CRATE_GOAL   : crate_goal,
+        DID_NOT_BOMB_GOAL   : avoided_crate_goal,
+        BOMBED_TOO_EARLY    : early_no_crates,
+        BOMBED_NO_CRATES    : early_no_crates,
+        CERTAIN_SUICIDE     : -kill,
+
+        # loop preventions
+        ALREADY_BOMBED_FIELD: loop_factor*self.bomb_loop_penalty,
         WAITED_UNNECESSARILY: -0.5,
-        BOMBED_CRATE_GOAL: 1,
-        BOMBED_TOO_EARLY: -0.2,
-        BOMBED_NO_CRATES: -0.2,
-        DID_NOT_BOMB_GOAL: -1,
-        OSCILLATION: -1,
+        OSCILLATION         : -1,
+
+        # passive
+        SURVIVED_STEP       : passive,
+
+        # ---- DEFAULT EVENTS ----
+        # movement
+        e.MOVED_LEFT         :  0,
+        e.MOVED_RIGHT        :  0,
+        e.MOVED_UP           :  0,
+        e.MOVED_DOWN         :  0,
+        e.WAITED             :  0,
+        e.INVALID_ACTION     : -1,
         
-        # Default events:
-        e.MOVED_LEFT: 0,
-        e.MOVED_RIGHT: 0,
-        e.MOVED_UP: 0,
-        e.MOVED_DOWN: 0,
-        e.WAITED: 0,
-        e.INVALID_ACTION: -1,
-        
-        e.BOMB_DROPPED: 0,
-        e.BOMB_EXPLODED: 0,
+        # bombing
+        e.BOMB_DROPPED       : lethal_change,
+        e.BOMB_EXPLODED      : 0,
 
-        e.CRATE_DESTROYED: 0.5,
-        e.COIN_FOUND: 0.2,
-        e.COIN_COLLECTED: 5,
+        # crates, coins
+        e.CRATE_DESTROYED    : crate,
+        e.COIN_FOUND         : 0,
+        e.COIN_COLLECTED     : coin,
 
-        e.KILLED_OPPONENT: 5,
-        e.KILLED_SELF: -5,
-
-        e.GOT_KILLED: -5,
+        # kills
+        e.KILLED_OPPONENT    : kill,
+        e.KILLED_SELF        : -kill,
+        e.GOT_KILLED         : -kill,
         e.OPPONENT_ELIMINATED: 0,
-        e.SURVIVED_ROUND: passive_constant,
+
+        # passive
+        e.SURVIVED_ROUND     : passive,
     }
     
     reward_sum = 0
