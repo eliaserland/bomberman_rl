@@ -19,23 +19,25 @@ from .callbacks import (transform, state_to_features, has_object,
 # TODO: REMOVE ALL MENTIONS OF state_to_vect.
 
 
-# Transition tuple. (s, a, r, s')
+# Transition tuple. (s, a, s', r)
 Transition = namedtuple('Transition',
-                       ('state', 'action', 'next_state', 'reward', 'n_step_next_state'))
+                       ('state', 'action', 'next_state', 'reward'))
 
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
-TRANSITION_HISTORY_SIZE = 4000  # Keep only ... last transitions.
-BATCH_SIZE              = 2000  # Size of batch in TD-learning.
-TRAIN_FREQ              = 5     # Train model every ... game.
+TRANSITION_HISTORY_SIZE = 1000  # Keep only ... last transitions.
+BATCH_SIZE              = 500  # Size of batch in TD-learning.
+TRAIN_FREQ              = 1     # Train model every ... game.
 
 # N-step TD Q-learning:
-GAMMA   = 0.95  # Discount factor.
-N_STEPS = 5    # Number of steps to consider real, observed rewards.
+GAMMA   = 0.8  # Discount factor.
+N_STEPS = 3    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
-PRIO_EXP_REPLAY = True                # Toggle on/off.
-PRIO_EXP_SIZE   = int(0.25*BATCH_SIZE) # Size of the chosen subset of TS.
+PRIO_EXP_REPLAY = True      # Toggle on/off.
+PRIO_EXP_FRACTION = 0.25    # Fraction of BATCH_SIZE to keep.
+
+#PRIO_EXP_SIZE   = int(0.25*BATCH_SIZE) # Size of the chosen subset of TS.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
@@ -44,9 +46,9 @@ DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
-EXPLORATION_INIT  = 1.0
-EXPLORATION_MIN   = 0.2
-EXPLORATION_DECAY = 0.999
+EXPLORATION_INIT  = 0.5
+EXPLORATION_MIN   = 0.05
+EXPLORATION_DECAY = 0.99995
 
 # Softmax: (0 < tau < infty)
 TAU_INIT  = 15
@@ -147,19 +149,11 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
-    
-
-
         # TODO: NEED TO PREVENT LOOPS
-        
         # TODO: Rethink all rewards.
-
         # TODO: Rethink the size of transition history, batch size and prio batch size. (perhaps even make it variable?)
-
         # TODO: See if there are more, smarter rewards to give.
-
         # TODO: Need to optimize the regularization in the regression fit.
-
 
     # ---------- (1) Add own events to hand out rewards: ----------
     # If the old state is not before the beginning of the game:
@@ -237,7 +231,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             # ---- CRATE BOMBING ----
             # Bombing of crates:
             crate_steps_old = state_old[0,8]
-            if crate_steps_old == 0:
+            if abs(crate_steps_old) < 0.01:
                 # Give reward if the agent was at the optimal crate-destroying position.
                 events.append(BOMBED_CRATE_GOAL)
             elif crate_steps_old > 0:
@@ -248,9 +242,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(BOMBED_NO_CRATES)
 
 
-
             # TODO: Bombing of other agents:
-
 
 
         # If the new state is not after the end of the game:
@@ -295,21 +287,29 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         events.append(SURVIVED_STEP)         
     
     # ---------- (2) Compute n-step reward and store tuple in Transitions: ----------
+    # Transition tuple structure: (s, a, s', r)
     self.n_step_transitions.append((transform(self, old_game_state), self_action, transform(self, new_game_state), reward_from_events(self, events)))
     
+    # When buffer is filled:
     if len(self.n_step_transitions) == N_STEPS:
-        
-        reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
-        n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
-        
+        # The given starting state with corresponding action for which we want
+        # to estimate the Q-value function.
         n_step_old_state = self.n_step_transitions[0][0]
-        n_step_new_state = self.n_step_transitions[0][2]
         n_step_action = self.n_step_transitions[0][1]
-        
-        after_n_step_new_state = self.n_step_transitions[-1][2]
-        
-        self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward, after_n_step_new_state))
 
+        # Rewards observed in N_STEPS after the starting state and action.
+        reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
+        # Sum with the discount factor to get the accumulated rewards over N_STEP transitions.
+        n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
+
+        # The new state after N_STEPS transitions following the policy.
+        n_step_new_state = self.n_step_transitions[-1][2]
+
+        assert not (n_step_action is None and n_step_old_state is not None)
+
+        # (s, a, s', r) where s' is the state after N_STEPS, and r is the accumulation of rewards until s'.
+        self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward))
+    
     # ---------- (3) Store the game state for feature extration function learning: ----------
     # Store the game state for learning of feature extration function.
     if old_game_state and not self.dr_override:
@@ -342,17 +342,25 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     
     
     # ---------- (1) Compute last n-step reward and store tuple in Transitions ----------
+    # Transition tuple structure: (s, a, s', r)
     self.n_step_transitions.append((transform(self, last_game_state), last_action, None, reward_from_events(self, events)))
     
+    # When buffer is filled:
     if len(self.n_step_transitions) == N_STEPS:
+        # The given starting state with corresponding action for which we want
+        # to estimate the Q-value function.
+        n_step_old_state = self.n_step_transitions[0][0]
+        n_step_action    = self.n_step_transitions[0][1]
+
+        # Rewards observed in N_STEPS after the starting state and action.
         reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
+        # Sum with the discount factor to get the accumulated rewards over N_STEPS transitions.
         n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
         
-        n_step_old_state = self.n_step_transitions[0][0]
-        n_step_new_state = self.n_step_transitions[0][2]
-        n_step_action = self.n_step_transitions[0][1]
+        assert not (n_step_action == None and n_step_old_state != None)
 
-        self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward, None))
+        # (s, a, s', r) where s' is the state after N_STEPS, and r is the accumulation of rewards until s'.
+        self.transitions.append(Transition(n_step_old_state, n_step_action, None, n_step_reward))
     
     # Store the game state for learning of feature extration function.
     if last_game_state and not self.dr_override:
@@ -373,67 +381,74 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     if len(self.transitions) > BATCH_SIZE and self.game_nr % TRAIN_FREQ == 0:
         # Create a random batch from the transition history.
         batch = random.sample(self.transitions, BATCH_SIZE)
-        X, targets, residuals = [], [], []
-        for state, action, state_next, n_step_reward, n_step_next_state in batch:
+            
+        # Initialization.
+        X = [[] for i in range(len(self.actions))] # Feature matrix for each action
+        y = [[] for i in range(len(self.actions))] # Target vector for each action
+        residuals = [[] for i in range(len(self.actions))] # Corresponding residuals.
+        
+        # For every transition tuple in the batch:
+        for state, action, next_state, reward in batch:
             # Current state cannot be the state before game start.
             if state is not None:
-                # Q-values for the current state.
-                if self.model_is_fitted:
-                    # Q-value function estimate.
-                    q_values = self.model.predict(state)
-                else:
-                    # Zero initialization.
-                    q_values = np.zeros(self.action_size).reshape(1, -1)
+                # Index of action taken in 'state'.
+                action_idx = self.actions.index(action)
 
-                # Q-value update for the given state and action.
-                if self.model_is_fitted and n_step_next_state is not None:
+                # Q-value for the given state and action.
+                if self.model_is_fitted and next_state is not None:
                     # Non-terminal next state and pre-existing model.
-                    maximal_response = np.max(self.model.predict(n_step_next_state))
-                    q_update =  (n_step_reward + GAMMA**N_STEPS *  maximal_response)
+                    maximal_response = np.max(self.model.predict(next_state))
+                    q_update = (reward + GAMMA**N_STEPS * maximal_response)
                 else:
                     # Either next state is terminal or a model is not yet fitted.
-                    q_update = n_step_reward
+                    q_update = reward # Equivalent to a Q-value of zero for the next state.
 
-                # Assign Q-value update. # TODO: possible to introduce a learning rate.
-                q_values[0][self.actions.index(action)] = q_update
-
-                # Append feature data and targets for the regression.
-                X.append(state[0])
-                targets.append(q_values[0])
+                # Append feature data and targets for the regression,
+                # corresponding to the current action.
+                X[action_idx].append(state[0])
+                y[action_idx].append(q_update)
 
                 # Prioritized experience replay.
                 if PRIO_EXP_REPLAY and self.model_is_fitted:
                     # Calculate the residuals for the training instance.
-                    action_idx = self.actions.index(action)
-                    X_tmp = X[-1].reshape(1, -1)
-                    target = targets[-1][action_idx]
-                    q_estimate = self.model.predict(X_tmp)[0][action_idx]
+                    X_tmp = X[action_idx][-1].reshape(1, -1)
+                    target = y[action_idx][-1]
+                    q_estimate = self.model.predict(X_tmp, action_idx=action_idx)[0]
                     res = (target - q_estimate)**2
-                    residuals.append(res)
-
+                    residuals[action_idx].append(res)
+        
         # Prioritized experience replay.
         if PRIO_EXP_REPLAY and self.model_is_fitted:
-            # Keep the N samples with the largest squared residuals.
-            idx = np.argpartition(residuals, -PRIO_EXP_SIZE)[-PRIO_EXP_SIZE:]
-
+            # Initialization
+            X_new = [[] for i in range(len(self.actions))]
+            y_new = [[] for i in range(len(self.actions))]
+            
+            # For the training set of every action:
+            for i in range(len(self.actions)):    
+                # Keep the specifed fraction of samples with the largest squared residuals.
+                prio_exp_size = int(len(residuals[i]) * PRIO_EXP_FRACTION)
+                idx = np.argpartition(residuals[i], -prio_exp_size)[-prio_exp_size:]
+                X_new[i] = [X[i][j] for j in list(idx)]
+                y_new[i] = [y[i][j] for j in list(idx)]
+            
             # Update the training set.
-            X = [X[i] for i in list(idx)]
-            targets = [targets[i] for i in list(idx)]
+            X = X_new
+            y = y_new
 
         # Regression fit.
-        #self.model.fit(X, targets)
-        self.model.partial_fit(X, targets)
+        self.model.partial_fit(X, y)
         self.model_is_fitted = True
 
         # Raise flag for export of the learned model.
         self.perform_export = True
 
+        # Logging
         self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
     # ---------- (4) Improve dimensionality reduction: ----------
     # Learn a new (hopefully improved) model for dimensionality reduction.
     if ((not self.dr_override) and
-        (self.game_nr % DR_FREQ == 0) and 
+        (self.game_nr % DR_FREQ == 0) and
         (len(self.state_history) > DR_MINIBATCH_SIZE)):
         
         # Minibatch learning on the collected samples # TODO: Try out sampling with/without replacement.

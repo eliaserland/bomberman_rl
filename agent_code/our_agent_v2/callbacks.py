@@ -8,6 +8,7 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import SGDRegressor
 from sklearn.decomposition import KernelPCA
 from sklearn.decomposition import IncrementalPCA
+from sklearn.base import clone
 from queue import Queue
 
 import settings as s
@@ -16,8 +17,8 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_new_rewards_nightrun"  # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'eps-greedy'         # Options: 'softmax', 'eps-greedy'
+FILENAME = "crates_custom_regressor_v3"  # Base filename of model (excl. extensions).
+ACT_STRATEGY = 'eps-greedy'              # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -60,7 +61,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = MultiOutputRegressor(SGDRegressor(alpha=0.0001, warm_start=True)) #, penalty='elasticnet'))
+        self.model = CustomRegressor(SGDRegressor(alpha=0.001, warm_start=True)) #, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -119,6 +120,9 @@ def act(self, game_state: dict) -> str:
             self.logger.debug("Choosing action with highest q_value.")
             q_values = self.model.predict(transform(self, game_state))[0][mask]
             execute_action = valid_actions[np.argmax(q_values)]
+        
+        assert execute_action != None
+        
         return execute_action
     else:
         raise ValueError(f"Unknown act_strategy {self.act_strategy}")
@@ -401,7 +405,7 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
         if len(s) > 1:
             next_node = s[1] # The very next node towards the best tile.
             rel_pos = (next_node[0]-x, next_node[1]-y)
-            return np.concatenate((rel_pos, c_steps), axis=None)
+            return np.concatenate((rel_pos, c_steps/10), axis=None)
         else:
             return np.zeros(3)
     return np.array([0, 0, -1])
@@ -446,7 +450,7 @@ def closest_coin_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, 
             if len(s) > 1:
                 next_node = s[1] # The very next node on path towards the coin.
                 rel_pos = (next_node[0]-x, next_node[1]-y)
-                return np.concatenate((rel_pos, c_steps), axis=None)
+                return np.concatenate((rel_pos, c_steps/10), axis=None)
             else:
                 return np.zeros(3)
     return np.array([0, 0, -1])
@@ -498,3 +502,62 @@ def get_valid_action(game_state: dict):
     valid_actions = np.array(valid_actions)
 
     return mask, valid_actions
+class CustomRegressor:
+    def __init__(self, estimator):
+        # Create one regressor for each action separately.
+        self.reg_model = [clone(estimator) for i in range(len(ACTIONS))]
+
+    def partial_fit(self, X, y):
+        '''
+        Fit each regressor individually on its set of data.
+
+        Parameters:
+        -----------
+        X: list
+            List of length len(ACTIONS), where each entry is a 2d array of
+            shape=(n_samples, n_features) with feature data corresponding to the
+            given regressor. While n_features must be the same for all arrays,
+            n_samples can optionally be different in every array.
+        y: list
+            List of length len(ACTIONS), where each entry is an 1d array of
+            shape=(n_samples,) corresponding to each regressor. Since each
+            regressor is fully independent, n_samples need not be equal for
+            every array in y, but must however match in size to the
+            corresponding array in X mentioned above.
+        
+        Returns:
+        --------
+        Nothing.
+        '''
+        for i in range(len(ACTIONS)):
+            self.reg_model[i].partial_fit(X[i], y[i])
+
+
+    def predict(self, X, action_idx=None):
+        '''
+        Get predictions from all regressors on a set of samples. Can also return
+        predictions by a single regressor.
+
+        Parameters:
+        -----------
+        X: np.array shape=(n_samples, n_features)
+            Feature matrix for the n_samples each with n_features as the number
+            of dimensions.
+        action_idx: int
+            (Optional) if action_idx is specified, only get predictions from
+            the chosen regressor.
+        
+        Returns:
+        --------
+        y_predict: np.array
+            If action_idx is unspecified, return the predictions by all regressors
+            for all samples in an array of shape=(n_samples, len(ACTIONS)). Else
+            return predictions for the single specified regressor, in an array
+            of shape=(n_samples,).
+        '''
+        if action_idx is None:
+            y_predict = [self.reg_model[i].predict(X) for i in range(len(ACTIONS))]
+            return np.vstack(y_predict).T # shape=(n_samples, len(ACTIONS))
+        else:
+            return self.reg_model[action_idx].predict(X) # shape=(n_samples,)
+
