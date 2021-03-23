@@ -120,9 +120,6 @@ def act(self, game_state: dict) -> str:
             self.logger.debug("Choosing action with highest q_value.")
             q_values = self.model.predict(transform(self, game_state))[0][mask]
             execute_action = valid_actions[np.argmax(q_values)]
-        
-        assert execute_action != None
-        
         return execute_action
     else:
         raise ValueError(f"Unknown act_strategy {self.act_strategy}")
@@ -153,7 +150,7 @@ def state_to_features(game_state: dict) -> np.array:
     _, _, bombs_left, (x, y) = game_state['self']
     arena = game_state['field']
     coins = game_state['coins']
-    bombs = [xy for (xy, t) in game_state['bombs']]         
+    bombs = [xy for (xy, t) in game_state['bombs']]
     others = [xy for (n, s, b, xy) in game_state['others']]
  
     # ---- COINS ----
@@ -184,6 +181,9 @@ def state_to_features(game_state: dict) -> np.array:
     # [bombs_left, escapable, lethal, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step, escape_x, escape_y]
     # [         0,         1,      2,      3,      4,         5,       6,       7,          8,        9,       10]
     return features.reshape(1, -1)
+
+    # [DANGER,         ATTACK,             ESCAPE,           ATTACK,           COIN,            CRATE] 
+    # [lethal, target_aquired, escape_x, escape_y, other_x, other_y, coin_x, coin_y, crate_x, crate_y]
 
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
     """

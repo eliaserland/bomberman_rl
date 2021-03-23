@@ -16,9 +16,6 @@ import events as e
 from .callbacks import (transform, state_to_features, has_object,
                         is_lethal, fname, FILENAME)
 
-# TODO: REMOVE ALL MENTIONS OF state_to_vect.
-
-
 # Transition tuple. (s, a, s', r)
 Transition = namedtuple('Transition',
                        ('state', 'action', 'next_state', 'reward'))
@@ -36,8 +33,6 @@ N_STEPS = 3    # Number of steps to consider real, observed rewards.
 # Prioritized experience replay:
 PRIO_EXP_REPLAY = True      # Toggle on/off.
 PRIO_EXP_FRACTION = 0.25    # Fraction of BATCH_SIZE to keep.
-
-#PRIO_EXP_SIZE   = int(0.25*BATCH_SIZE) # Size of the chosen subset of TS.
 
 # Dimensionality reduction from learning experience.
 DR_FREQ           = 1000    # Play ... games before we fit DR.
@@ -114,7 +109,7 @@ def setup_training(self):
         with open(FNAME_DATA, "rb") as file:
             self.historic_data = pickle.load(file)
         self.game_nr = max(self.historic_data['games']) + 1
-    else:    
+    else:
         # Start a new historic record.
         self.historic_data = {
             'score' : [],       # subplot 1
@@ -305,8 +300,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         # The new state after N_STEPS transitions following the policy.
         n_step_new_state = self.n_step_transitions[-1][2]
 
-        assert not (n_step_action is None and n_step_old_state is not None)
-
         # (s, a, s', r) where s' is the state after N_STEPS, and r is the accumulation of rewards until s'.
         self.transitions.append(Transition(n_step_old_state, n_step_action, n_step_new_state, n_step_reward))
     
@@ -356,8 +349,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         reward_arr = np.array([self.n_step_transitions[i][-1] for i in range(N_STEPS)])
         # Sum with the discount factor to get the accumulated rewards over N_STEPS transitions.
         n_step_reward = ((GAMMA)**np.arange(N_STEPS)).dot(reward_arr)
-        
-        assert not (n_step_action == None and n_step_old_state != None)
 
         # (s, a, s', r) where s' is the state after N_STEPS, and r is the accumulation of rewards until s'.
         self.transitions.append(Transition(n_step_old_state, n_step_action, None, n_step_reward))
