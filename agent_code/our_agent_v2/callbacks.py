@@ -146,13 +146,42 @@ def state_to_features(game_state: dict) -> np.array:
     :param game_state:  A dictionary describing the current game board.
     :return: np.array
     """
-    # Extracting information from the game state dictionary.
+    # ---- INFORMATION EXTRACTION ----
+    # Getting all useful information from the game state dictionary.
     _, _, bombs_left, (x, y) = game_state['self']
     arena = game_state['field']
     coins = game_state['coins']
     bombs = [xy for (xy, t) in game_state['bombs']]
     others = [xy for (n, s, b, xy) in game_state['others']]
  
+    '''
+    # ---- DANGER ----
+    # Binary indicator telling if agent is currently standing in mortal danger.
+    lethal = int(is_lethal(x, y, arena, bombs))
+
+    # ---- ATTACK ----
+    # Enemy or crate, the optimum position for bomb-laying has been reached. 
+    target_acquired = int(target_reached()) # TODO: Implement this. (AND BOMB CAN BE PLACED)
+
+    # ---- ESCAPE ----
+    # Direction towards the closest escape from imminent danger.
+    escape_direction = escape_dir(x, y, arena, bombs, others)    
+
+    # ---- OTHERS ----
+    # Direction towards the best offensive tile against other agents.
+    others_direction = others_dir() # TODO: Implement this.
+
+    # ---- COINS ----
+    # Direction towards the closest reachable coin.
+    coin_direction = closest_coin_dir(x, y, coins, arena, bombs, others) # TODO: REMOVE DISTANCE, don't forget train.py
+
+    # ---- CRATES ----
+    # Direction towards the best offensive tile for destroying crates.
+    crates_direction = crates_dir(x, y, 30, arena, bombs, others) # TODO: REMOVE DISTANCE, don't forget to change train.py
+    '''
+
+    ###########################################################################
+    ###########################################################################
     # ---- COINS ----
     # Normalized vector indicating the direction of the closest coin and the no.
     # of steps to get there.
@@ -182,8 +211,9 @@ def state_to_features(game_state: dict) -> np.array:
     # [         0,         1,      2,      3,      4,         5,       6,       7,          8,        9,       10]
     return features.reshape(1, -1)
 
-    # [DANGER,         ATTACK,             ESCAPE,           ATTACK,           COIN,            CRATE] 
+    # [DANGER,         ATTACK,             ESCAPE,           OTHERS,          COINS,           CRATES]
     # [lethal, target_aquired, escape_x, escape_y, other_x, other_y, coin_x, coin_y, crate_x, crate_y]
+    # [     0,              1,        2,        3,       4,       5,      6,      7,       8,       9]
 
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
     """
