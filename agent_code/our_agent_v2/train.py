@@ -31,7 +31,7 @@ GAMMA   = 0.8  # Discount factor.
 N_STEPS = 3    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
-PRIO_EXP_REPLAY = True      # Toggle on/off.
+PRIO_EXP_REPLAY   = True      # Toggle on/off.
 PRIO_EXP_FRACTION = 0.25    # Fraction of BATCH_SIZE to keep.
 
 # Dimensionality reduction from learning experience.
@@ -41,9 +41,9 @@ DR_MINIBATCH_SIZE = 10000   # Nr. of states in each mini-batch.
 DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 
 # Epsilon-Greedy: (0 < epsilon < 1)
-EXPLORATION_INIT  = 0.5
-EXPLORATION_MIN   = 0.05
-EXPLORATION_DECAY = 0.99995
+EXPLORATION_INIT  = 1.0
+EXPLORATION_MIN   = 0.005
+EXPLORATION_DECAY = 0.99995 #0.99995
 
 # Softmax: (0 < tau < infty)
 TAU_INIT  = 15
@@ -58,23 +58,22 @@ PLOT_FREQ = 25
 FNAME_DATA = f"{FILENAME}_data.pt"
 
 # Custom events:
-SURVIVED_STEP = "SURVIVED_STEP"
-ALREADY_BOMBED_FIELD = "ALREADY_BOMBED_FIELD"
-ESCAPED_LETHAL = "ESCAPED_LETHAL"
-ENTERED_LETHAL = "ENTERED_LETHAL"
+CLOSER_TO_ESCAPE = "CLOSER_TO_ESCAPE"
+FURTHER_FROM_ESCAPE = "FURTHER_FROM_ESCAPE"
+BOMBED_GOAL = "BOMBED_GOAL"
+MISSED_GOAL = "MISSED_GOAL"
+WAITED_NECESSARILY = "WAITED_NECESSARILY"
+WAITED_UNNECESSARILY = "WAITED_UNNECESSARILY"
+CLOSER_TO_OTHERS = "CLOSER_TO_OTHERS"
+FURTHER_FROM_OTHERS = "FURTHER_FROM_OTHERS"
 CLOSER_TO_COIN = "CLOSER_TO_COIN"
 FURTHER_FROM_COIN = "FURTHER_FROM_COIN"
 CLOSER_TO_CRATE = "CLOSER_TO_CRATE"
 FURTHER_FROM_CRATE = "FURTHER_FROM_CRATE"
-CERTAIN_SUICIDE = "CERTAIN_SUICIDE"
-WAITED_UNNECESSARILY = "WAITED_UNNECESSARILY"
-BOMBED_CRATE_GOAL = "BOMBED_CRATE_GOAL"
-BOMBED_TOO_EARLY = "BOMBED_TOO_EARLY"
-BOMBED_NO_CRATES = "BOMBED_NO_CRATES"
-DID_NOT_BOMB_GOAL = "DID_NOT_BOMB_GOAL"
-OSCILLATION = "OSCILLATION"
-CLOSER_TO_ESCAPE = "CLOSER_TO_ESCAPE"
-FURTHER_FROM_ESCAPE = "FURTHER_FROM_ESCAPE"
+SURVIVED_STEP = "SURVIVED_STEP"
+
+#ALREADY_BOMBED_FIELD = "ALREADY_BOMBED_FIELD"
+#OSCILLATION = "OSCILLATION"
 
 def setup_training(self):
     """
@@ -157,6 +156,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         state_old = state_to_features(old_game_state)
         _, _, _, (x, y) = old_game_state['self']
        
+        '''
+        # TODO: SEE OVER THIS. 
         # ---- SMALL MOVEMENT LOOP PREVENTION ----
         # Check if coordinate sequence is stricly alterating between two tiles.
         self.coordinate_history.append((x, y))
@@ -169,43 +170,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     is_different.append(comparison)
                 if all(is_different):
                     events.append(OSCILLATION)
-
-        # ---- UNNECESSARY WAITING ----
-        # Punish if agent chose to wait, but no tile in its surrounding was lethal.
-        # TODO: Check if agent could move to another non-lethal tile
-        if self_action == 'WAIT':
-            arena_old = old_game_state['field']
-            bombs_old = [xy for (xy, t) in old_game_state['bombs']]
-            directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
-            lethal_directions = np.zeros(5)
-            for i, (ix, iy) in enumerate(directions): 
-                if not has_object(ix, iy, arena_old, 'wall'):
-                    lethal_directions[i] = int(is_lethal(ix, iy, arena_old, bombs_old))
-                else:
-                    lethal_directions[i] = -1
-            if not any(lethal_directions == 1):
-                events.append(WAITED_UNNECESSARILY)
-        
-        # ---- MOVEMENT WHEN IN LETHAL ----
-        # Reward for following/punishment for not following the escape direction.
-        islethal_old = state_old[0,2] == 1
-        if islethal_old: # When in the lethal region:
-            escape_dir_old = state_old[0,9:11]
-            if ((all(escape_dir_old == ( 0, 1)) and self_action == 'DOWN' ) or
-                (all(escape_dir_old == ( 1, 0)) and self_action == 'RIGHT') or
-                (all(escape_dir_old == ( 0,-1)) and self_action == 'UP'   ) or
-                (all(escape_dir_old == (-1, 0)) and self_action == 'LEFT' )):
-                events.append(CLOSER_TO_ESCAPE)
-            else:
-                events.append(FURTHER_FROM_ESCAPE)
-
-        # ---- CRATE BOMBING ENCOURAGEMENT ----
-        # Reached the optimal bomb-laying position, but did not drop bomb.
-        bomb_is_possible = state_old[0,0] == 1
-        crate_steps_old = state_old[0,8]
-        if bomb_is_possible and self_action != 'BOMB' and crate_steps_old == 0:
-            events.append(DID_NOT_BOMB_GOAL)
-
+        '''
+        '''
         # If bomb was dropped:
         if self_action == 'BOMB':
             # ---- BOMB LOOP PREVENTION ----
@@ -216,68 +182,85 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             self.bomb_loop_penalty = np.sum((counts-1)**2)
             if self.bomb_loop_penalty > 0:
                 events.append(ALREADY_BOMBED_FIELD)
+        '''
+
+
+
         
-            # ---- SUICIDE PREVENTION ----
-            # Punish if bomb was placed in a position where escape was impossible.
-            inescapable = state_old[0,1] == 0
-            if inescapable:
-                events.append(CERTAIN_SUICIDE)
+        # Extract the lethal indicator for the old state.
+        islethal_old = state_old[0,0] == 1
+        if islethal_old:
+            # ---- WHEN IN LETHAL ----
+            # When in lethal danger, we only care about escaping. Following the
+            # escape direction is rewarded, anything else is penalized.
+            escape_dir_old = state_old[0,2:4]
+            if check_direction(escape_dir_old, self_action):
+                events.append(CLOSER_TO_ESCAPE)
+            else:
+                events.append(FURTHER_FROM_ESCAPE)
 
-            # ---- CRATE BOMBING ----
-            # Bombing of crates:
-            crate_steps_old = state_old[0,8]
-            if abs(crate_steps_old) < 0.01:
-                # Give reward if the agent was at the optimal crate-destroying position.
-                events.append(BOMBED_CRATE_GOAL)
-            elif crate_steps_old > 0:
-                # Give penalty if the optimal position was not yet reached.
-                events.append(BOMBED_TOO_EARLY)
-            elif crate_steps_old == -1:
-                # Give penalty if no crates was in range, but bomb was laid anyway.
-                events.append(BOMBED_NO_CRATES)
+        else:
+            # ---- WHEN IN NON-LETHAL ----
+            # When not in lethal danger, we are less stressed to make the right
+            # decision. Our order of prioritization is: others > coins > crates.
 
+            # Extracting information from the old game state.
+            target_acq_old = state_old[0,1]            
+            others_dir_old = state_old[0,4:6]
+            coins_dir_old  = state_old[0,6:8]
+            crates_dir_old = state_old[0,8:10]
 
-            # TODO: Bombing of other agents:
+            # If we chose to bomb in the previous state:
+            if self_action == 'BOMB':
+                # Reward if we successfully bombed the target, else penalize.
+                if target_acq_old == 1:
+                    events.append(BOMBED_GOAL)
+                else:
+                    events.append(MISSED_GOAL)
 
+            # If we chose to wait in the previous state:
+            elif self_action == 'WAIT':
+                # Reward the agent if the waiting was neccesary, but penalize
+                # if a direction for others, coins or crates was suggested.
+                if (all(others_dir_old == (0,0)) and
+                    all(coins_dir_old  == (0,0)) and
+                    all(crates_dir_old == (0,0)) and
+                    target_acq_old == 0):
+                    events.append(WAITED_NECESSARILY)
+                else:
+                    events.append(WAITED_UNNECESSARILY)
 
-        # If the new state is not after the end of the game:
-        if new_game_state:
-            # Extract feature vector:
-            state_new = state_to_features(new_game_state)
+            # If we chose to move in the previous state:
+            else:
+                # Penalize if we were standing at the bomb goal, but moved.
+                if target_acq_old == 1:
+                    events.append(MISSED_GOAL)
 
-            # ---- LETHAL STATUS CHANGE ----
-            # The agent's lethal status at its position in each game state.
-            lethal_new = state_new[0,2]
-            lethal_old = state_old[0,2]
-            if lethal_new > lethal_old:
-                events.append(ENTERED_LETHAL)
-            elif lethal_old > lethal_new:
-                events.append(ESCAPED_LETHAL)
+                # Movement priority: others > coins > crates.
+            
+                # Reward/penalize for moving towards/away from the offensive target.
+                if not all(others_dir_old == (0,0)):
+                    if check_direction(others_dir_old, self_action):
+                        events.append(CLOSER_TO_OTHERS)
+                    else:
+                        events.append(FURTHER_FROM_OTHERS)
 
-            # ---- COIN MOVEMENT ----
-            # Closer to/further from the closest coin.
-            coin_step_new = state_new[0,5]
-            coin_step_old = state_old[0,5]
-            if (coin_step_new != -1 and # Only consider reward if the coin distance
-                coin_step_old != -1):   # can be compared between two states.
-                if coin_step_old > coin_step_old:
-                    events.append(CLOSER_TO_COIN)
-                elif coin_step_old < coin_step_new:
-                    events.append(FURTHER_FROM_COIN)
+                # Reward/penalize for moving towards/away from the closest coin.
+                elif not all(coins_dir_old == (0,0)):
+                    if check_direction(coins_dir_old, self_action):
+                        events.append(CLOSER_TO_COIN)
+                    else:
+                        events.append(FURTHER_FROM_COIN)
 
-            # ---- CRATE MOVEMENT ----
-            # Closer to/further from best crate position.
-            crate_step_new = state_new[0,8]
-            crate_step_old = state_old[0,8]
-            if (bomb_is_possible and        # Only if bombing is available.
-                crate_step_new != -1 and    # Not if no crates could be found.
-                crate_step_old != -1):
-                if crate_step_old > crate_step_new:
-                    events.append(CLOSER_TO_CRATE)
-                elif crate_step_old < crate_step_new:
-                    events.append(FURTHER_FROM_CRATE)
+                # Reward/penalize for moving towards/away from the crate target.
+                elif not all(crates_dir_old == (0,0)):
+                    if check_direction(crates_dir_old, self_action):
+                        events.append(CLOSER_TO_CRATE)
+                    else:
+                        events.append(FURTHER_FROM_CRATE)
+            
 
-    # Reward for surviving:
+    # Reward for surviving (effectively a passive reward).
     if not 'GOT_KILLED' in events:
         events.append(SURVIVED_STEP)         
     
@@ -559,62 +542,44 @@ def reward_from_events(self, events: List[str]) -> int:
     # Base rewards:
     kill  = s.REWARD_KILL
     coin  = s.REWARD_COIN
-    #crate = 0.1 * coin
-
-    passive = 0 # Always added to rewards for every step in game.
-
-    loop_factor = -0.1     # Scale factor for loop penalty.
-
-
-    # --- re-weighing the rewards ---
-    # Moving in/out of lethal range.
-    lethal_change = 0.5 * kill
+    crate = 0.1 * coin
     
-    # Step in escape direction
-    lethal_movm   = 0.25 * lethal_change
+    escape_movement    = 0.1  * kill
+    bombing            = 0.1  * kill
+    waiting            = 0.1  * kill
+    offensive_movement = 0.05 * kill
+    coin_movement      = 0.1  * coin
+    crate_movement     = 0.05 * coin
 
-    # Step towards the closest coin.
-    coin_movm =  0.75 * (lethal_movm - 0.25*coin) # coin_movm < (lethal_movm - 0.25*coin) 
-
-    # Step towards the best crate-destroying position.
-    crate_movm = 0.5 * coin_movm # (coin_movm + 0.25*coin - 0.25 * 10 * crate)
-
-    crate = 0.75 * 0.1 * (coin + 4 * (coin_movm - crate_movm))
-
-    early_no_crates = -(4*lethal_movm + lethal_change)  # Must be a strict equality, do not alter
-    crate_goal = -early_no_crates
-
-    avoided_crate_goal = 0.5 * (-4*(coin_movm - crate_movm) - coin)
+    passive = 0
 
     # Game reward dictionary:
     game_rewards = {
         # ---- CUSTOM EVENTS ----
-        # lethal movement
-        ESCAPED_LETHAL      : lethal_change,
-        ENTERED_LETHAL      : -lethal_change,
-        CLOSER_TO_ESCAPE    : lethal_movm,
-        FURTHER_FROM_ESCAPE : -lethal_movm,
+        # escape movement
+        CLOSER_TO_ESCAPE    : escape_movement,
+        FURTHER_FROM_ESCAPE : -escape_movement,
+
+        # bombing
+        BOMBED_GOAL         : bombing,
+        MISSED_GOAL         : -4*escape_movement, # to prevent self-bomb-laying loops
+
+        # waiting
+        WAITED_NECESSARILY  : waiting,
+        WAITED_UNNECESSARILY: -waiting,
+
+        # offensive movement
+        CLOSER_TO_OTHERS    : offensive_movement,
+        FURTHER_FROM_OTHERS : -offensive_movement,
 
         # coin movement
-        CLOSER_TO_COIN      : coin_movm,
-        FURTHER_FROM_COIN   : -coin_movm,
+        CLOSER_TO_COIN      : coin_movement,
+        FURTHER_FROM_COIN   : -coin_movement,
         
         # crate movement
-        CLOSER_TO_CRATE     : crate_movm,
-        FURTHER_FROM_CRATE  : -crate_movm,
+        CLOSER_TO_CRATE     : crate_movement,
+        FURTHER_FROM_CRATE  : -crate_movement,
         
-        # bombing
-        BOMBED_CRATE_GOAL   : crate_goal,
-        DID_NOT_BOMB_GOAL   : avoided_crate_goal,
-        BOMBED_TOO_EARLY    : early_no_crates,
-        BOMBED_NO_CRATES    : early_no_crates,
-        CERTAIN_SUICIDE     : -kill,
-
-        # loop preventions
-        ALREADY_BOMBED_FIELD: loop_factor*self.bomb_loop_penalty,
-        WAITED_UNNECESSARILY: -0.5,
-        OSCILLATION         : -1,
-
         # passive
         SURVIVED_STEP       : passive,
 
@@ -628,7 +593,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.INVALID_ACTION     : -1,
         
         # bombing
-        e.BOMB_DROPPED       : lethal_change,
+        e.BOMB_DROPPED       : 0,
         e.BOMB_EXPLODED      : 0,
 
         # crates, coins
@@ -652,3 +617,24 @@ def reward_from_events(self, events: List[str]) -> int:
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
+
+
+def check_direction(direction: np.array, self_action: str) -> bool:
+    """
+    Check if a taken action was the appropriate one given a certain
+    direction vector.
+    
+    Parameters:
+    -----------
+    direction: np.array shape=(2,)
+        Binary direction vector indicating the optimal direction to take.
+    
+    Returns:
+    --------
+    is_correct_action: bool
+        True if the action taken was the correct one given the direction vector.
+    """
+    return ((all(direction == ( 0, 1)) and self_action == 'DOWN' ) or
+            (all(direction == ( 1, 0)) and self_action == 'RIGHT') or
+            (all(direction == ( 0,-1)) and self_action == 'UP'   ) or
+            (all(direction == (-1, 0)) and self_action == 'LEFT' ))

@@ -17,7 +17,7 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_custom_regressor_v3"  # Base filename of model (excl. extensions).
+FILENAME = "crates_final_v3"  # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'              # Options: 'softmax', 'eps-greedy'
 # --------------------------------------------
 
@@ -61,7 +61,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = CustomRegressor(SGDRegressor(alpha=0.001, warm_start=True)) #, penalty='elasticnet'))
+        self.model = CustomRegressor(SGDRegressor(alpha=0.0001, warm_start=True)) #, penalty='elasticnet'))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -154,66 +154,44 @@ def state_to_features(game_state: dict) -> np.array:
     bombs = [xy for (xy, t) in game_state['bombs']]
     others = [xy for (n, s, b, xy) in game_state['others']]
  
-    '''
+    #--------------------------------------------------------------------------
     # ---- DANGER ----
-    # Binary indicator telling if agent is currently standing in mortal danger.
-    lethal = int(is_lethal(x, y, arena, bombs))
-
-    # ---- ATTACK ----
-    # Enemy or crate, the optimum position for bomb-laying has been reached. 
-    target_acquired = int(target_reached()) # TODO: Implement this. (AND BOMB CAN BE PLACED)
+    # Boolean indicator telling if agent is currently standing in mortal danger.
+    lethal = is_lethal(x, y, arena, bombs)
 
     # ---- ESCAPE ----
     # Direction towards the closest escape from imminent danger.
     escape_direction = escape_dir(x, y, arena, bombs, others)    
-
+    
+    #--------------------------------------------------------------------------
     # ---- OTHERS ----
     # Direction towards the best offensive tile against other agents.
-    others_direction = others_dir() # TODO: Implement this.
+    others_direction, others_reached = others_dir(x, y, 10, arena, bombs, others)
 
     # ---- COINS ----
     # Direction towards the closest reachable coin.
-    coin_direction = closest_coin_dir(x, y, coins, arena, bombs, others) # TODO: REMOVE DISTANCE, don't forget train.py
+    coin_direction = coins_dir(x, y, coins, arena, bombs, others)
 
     # ---- CRATES ----
     # Direction towards the best offensive tile for destroying crates.
-    crates_direction = crates_dir(x, y, 30, arena, bombs, others) # TODO: REMOVE DISTANCE, don't forget to change train.py
-    '''
-
-    ###########################################################################
-    ###########################################################################
-    # ---- COINS ----
-    # Normalized vector indicating the direction of the closest coin and the no.
-    # of steps to get there.
-    coin_dir = closest_coin_dir(x, y, coins, arena, bombs, others)
-
-    # ---- CRATES ----
-    # Find tile within a specified radius which can be reached by agent and destroyes the most crates
-    crates_direction = crates_dir(x, y, 30, arena, bombs, others)
-
-    # ---- ESCAPE FROM BOMB ----
-    # Agent can escape from its own bomb, if placed at its current position.
-    escapable = int(is_escapable(x, y, arena))
-
-    # Normalized vector indicating the direction of the nearest non-lethal tile.
-    escape_direction = escape_dir(x, y, arena, bombs, others)
-
-    # ---- LETHAL INDICATOR  -----
-    # Check if the agent's position is lethally dangerous.
-    lethal = int(is_lethal(x, y, arena, bombs))
+    crates_direction, crates_reached = crates_dir(x, y, 30, arena, bombs, others)
  
-    # ---------------------------
-    # Joining the scalar features into a numpy vector.
-    scalar_feat = np.array([int(bombs_left), escapable, lethal])
-    # Concatenating all subvectors into the final feature vector.
-    features = np.concatenate((scalar_feat, coin_dir, crates_direction, escape_direction), axis=None)
-    # [bombs_left, escapable, lethal, coin_x, coin_y, coin_step, crate_x, crate_y, crate_step, escape_x, escape_y]
-    # [         0,         1,      2,      3,      4,         5,       6,       7,          8,        9,       10]
-    return features.reshape(1, -1)
+    #--------------------------------------------------------------------------
+    # ---- ATTACK ----
+    # Enemy or crate, the optimum position for bomb-laying has been reached, 
+    # while having an available bomb and not having lethal status currently.
+    # TODO: Make this prioritze agents over crates.
+    target_acquired = int((others_reached or crates_reached) and bombs_left and not lethal)
 
+    #--------------------------------------------------------------------------
     # [DANGER,         ATTACK,             ESCAPE,           OTHERS,          COINS,           CRATES]
     # [lethal, target_aquired, escape_x, escape_y, other_x, other_y, coin_x, coin_y, crate_x, crate_y]
     # [     0,              1,        2,        3,       4,       5,      6,      7,       8,       9]
+    features = np.concatenate((int(lethal), target_acquired,
+                                escape_direction, others_direction,
+                                coin_direction, crates_direction), axis=None)
+    return features.reshape(1, -1)
+   
 
 def has_object(x: int, y: int, arena: np.array, object: str) -> bool:
     """
@@ -380,30 +358,54 @@ def destructible_crates(x: int, y: int, arena: np.array) -> int:
     else:
         return -1
 
-def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: list) -> np.array:
+def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: list) -> (np.array, bool):
     """
-    Given the agent's position at (x,y) find the tile within n steps which
-    would yield the largest amount of destroyed crates if a bomb where to be
-    placed there. Returns a vector with the normalized direction to this tile
-    and the number of steps to get there. Returns the zero vector with -1 as the
-    step count if no crates could be found within the n step radius.
+    Given the agent's position at (x,y) find the tile within a given amount of
+    steps which would yield the largest amount of destroyed crates if a bomb
+    where to be at this location.
+    
+    Parameters:
+    -----------
+    x: int
+        Agent's x-coordinate.
+    y: int
+        Agent's y-coordinate.
+    n: int
+        The max number of steps from the agent's position to consider.
+    arena: np.array shape=(width, height)
+        Game state information: walls, crates and free tiles.
+    bombs: list
+        List of coordinate tuples (x, y) for all currently active bombs.
+    others: list
+        List of coordinate tuples (x, y) for all other agents.
+
+    Returns:
+    --------
+    rel_pos: np.array shape=(2,)
+        Relative position vector from the agent's position, indicating the next
+        tile on the path towards the best crate-destroying position.
+        Returns the zero-vector if no candidates could be found within the
+        specifed search radius.
+    target_reached: bool
+        True if we have successfully reached the optimal position.
     """
-    candidates = [] 
+    candidates = []
    
     # Breadth-first search for the tile with most effective bomb placement.
     q = Queue()
     visited, graph = [], {}
     root = ((x, y), 0, (None, None)) # ((x, y), steps, (parent_x, parent_y))
     visited.append(root[0]) # Keeping track of visited nodes.
-    q.put(root)             
+    q.put(root)
     while not q.empty():
         (ix, iy), steps, parent = q.get() # Taking the next node from the queue.
-        if steps > n:                     # Stop condition.
+        if steps > n:                     # Stopping condition.
             continue
         graph[(ix, iy)] = parent          # Save the node with its parent.
         
-        # Determine no. of destructible crates and escape status.
+        # Determine no. of destructible crates at the current position.
         crates = destructible_crates(ix, iy, arena)
+        # Only save escapable candidates with a non-zero amount of crates.
         if crates > 0 and is_escapable(ix, iy, arena):
             candidates.append((crates, steps, (ix, iy)))
         
@@ -415,15 +417,15 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
                 q.put((neighb, steps+1, (ix, iy)))
     
     if candidates:
-        # Finding the best tile from the candidates.
+        # Find the best tile from the candidates.
         w_max = 0
         for crates, steps, (ix, iy) in candidates:
             w = crates/(4+steps) # Average no. of destroyed crates per step.
             if w > w_max:
-                w_max = w
-                cx, cy, c_steps = ix, iy, steps
-        
-        # Traverse the graph backwards from the target node to the source node.
+                w_max = w 
+                cx, cy = ix, iy 
+        # Traverse the graph backwards from the target node to the source node,
+        # to recover the best path for the agent.
         s = []          # empty sequence
         node = (cx, cy) # target node
         if graph[node] != (None, None) or node == (x, y):
@@ -431,28 +433,53 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
                 s.insert(0, node)  # Insert at the front of the sequence.
                 node = graph[node] # Get the parent.
 
-        # Assigning a direction and distance to the tile.
         if len(s) > 1:
-            next_node = s[1] # The very next node towards the best tile.
-            rel_pos = (next_node[0]-x, next_node[1]-y)
-            return np.concatenate((rel_pos, c_steps/10), axis=None)
-        else:
-            return np.zeros(3)
-    return np.array([0, 0, -1])
+            # We have found a candidate tile, and we are not at this position.
+            # Get the very next tile on the path towards the best crate position.
+            nx, ny = s[1]
+            # Only suggest crate direction if next tile is not lethal.
+            if not is_lethal(nx, ny, arena, bombs):
+                rel_pos = np.array([nx-x, ny-y])
+                return rel_pos, False
+        elif len(s) == 1:
+            # We have a candidate tile, and we are standing at this position.
+            return np.zeros(2), True
+    # We have either found no candidate tiles, or a lethal tile is blocking the
+    # path towards the best candidate tile.
+    return np.zeros(2), False
 
-def closest_coin_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, others: list) -> np.array:
+def coins_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, others: list) -> np.array:
     """
-    # TODO: Outdated function description, redo.
-    Given the agent's position at (x,y) get the normalized position vector
-    towards the closest revealed coin and the l1 distance to this coin. Returns
-    the zero vector with -1 as the l1 distance if no coins are present.
+    Find the direction towards the closest revealed and reachable coin.
+
+    Parameters:
+    -----------
+    x: int
+        Agent's x-coordinate.
+    y: int
+        Agent's y-coordinate.
+    coins: list
+        List of coordinate tuples (x, y) for all revealed coins.
+    arena: np.array shape=(width, height)
+        Game state information: walls, crates and free tiles.
+    bombs: list
+        List of coordinate tuples (x, y) for all currently active bombs.
+    others: list
+        List of coordinate tuples (x, y) for all other agents.
+
+    Returns:
+    --------
+    rel_pos: np array shape=(2,)
+        Relative position vector from the agent's position, indicating the next
+        tile on the path towards the closest revealed and reachable coin.
+        Returns the zero-vector if no coins are present or can be reached.
     """
     reachable = False # initialization
     if coins:
         # Perform a breadth-first search for the closest coin.
         q = Queue()
         visited = []
-        graph = {}  
+        graph = {}
         root = ((x, y), 0, (None, None)) # ((x, y), steps, (parent_x, parent_y))
         visited.append(root[0])
         q.put(root)
@@ -460,30 +487,155 @@ def closest_coin_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, 
             (ix, iy), steps, parent = q.get()
             graph[(ix, iy)] = parent
             if (ix, iy) in coins:
-                reachable = True
-                cx, cy, c_steps = ix, iy, steps
-                break
+                reachable = True # Found the closest reachable coin.
+                cx, cy = ix, iy  # Save position. 
+                break            # Stop the search.
             neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
             for neighb in neighbours:
                 if not neighb in visited:
                     visited.append(neighb)
                     q.put((neighb, steps+1, (ix, iy)))
         if reachable:
-            # Traverse graph backwards to recover the path to the closest coin.
-            s = []          # empty sequence
-            node = (cx, cy) # target node
+            # Traverse graph backwards to recover the path to the closest coin
+            # from the position of the agent.
+            s = []          # List to hold the sequence of tiles.
+            node = (cx, cy) # Target node, coin position.
             if graph[node] != (None, None) or node == (x, y):
                 while node != (None, None):
-                    s.insert(0, node)  # insert at the front of the sequence
-                    node = graph[node] # get the parent node
-            # Assignment of direction towards the coin.
+                    s.insert(0, node)  # Insert at the front of the sequence.
+                    node = graph[node] # Get the parent node.
+            # If we are not already standing at the coin position.
             if len(s) > 1:
-                next_node = s[1] # The very next node on path towards the coin.
-                rel_pos = (next_node[0]-x, next_node[1]-y)
-                return np.concatenate((rel_pos, c_steps/10), axis=None)
-            else:
-                return np.zeros(3)
-    return np.array([0, 0, -1])
+                # Get the very next tile on best path towards the coin.
+                nx, ny = s[1]
+                # Only suggest coin direction if next tile is not lethal.
+                if not is_lethal(nx, ny, arena, bombs):
+                    rel_pos = np.array([nx-x, ny-y])
+                    return rel_pos
+    return np.zeros(2)
+
+def is_lethal_for_others(x: int, y: int, arena: np.array, others: list) -> bool:
+    """
+    Determine if a bomb placed at position (x, y) would place any of the 
+    other agents in lethal danger.
+
+    Parameters:
+    -----------
+    x: int
+        x-coordinate for bomb placement.
+    y: int
+        y-coordinate for bomb placement.
+    arena: np.array shape=(width, height)
+        Game state information: walls, crates and free tiles.
+    others: list
+        List of coordinate tuples (x, y) for all other agents.
+
+    Returns:
+    --------
+    lethal_for_others: bool
+        True if a bomb in (x, y) would be lethally dangerous for any agent.
+    """
+    if has_object(x, y, arena, 'free'):
+        directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+        lethal_for_others = False
+        for direction in directions:
+            ix, iy = x, y
+            ix, iy = increment_position(ix, iy, direction)
+            while (not has_object(ix, iy, arena, 'wall') and
+                    abs(x-ix) <= 3 and abs(y-iy) <= 3):
+                if (ix, iy) in others:
+                    lethal_for_others = True
+                    break
+                ix, iy = increment_position(ix, iy, direction)
+        return lethal_for_others
+    else:
+        raise ValueError("Can only place bombs at tiles of type 'free'.")
+
+def others_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: list) -> (np.array, bool):
+    """
+    Find the best tile for offensive bomb placement against other agents, within
+    a search radius of n steps from the agent's position at (x, y).
+    
+    Parameters:
+    -----------
+    x: int
+        Agent's x-coordinate.
+    y: int
+        Agent's y-coordinate.
+    n: int
+        The max number of steps from the agent's position to consider.
+    arena: np.array shape=(width, height)
+        Game state information: walls, crates and free tiles.
+    bombs: list
+        List of coordinate tuples (x, y) for all currently active bombs.
+    others: list
+        List of coordinate tuples (x, y) for all other agents.
+
+    Returns:
+    --------
+    rel_pos: np.array shape=(2,)
+        Relative position vector from the agent's position, indicating the next
+        tile on the path towards the best agent-defeating position. Returns
+        the zero-vector if no other agents are present or can be reached.
+    target_reached: bool
+        True if we have successfully reached the optimal position.
+    """
+    if others:
+        # Initialization
+        reachable = False
+
+        # Breadth-first search for the closest reachable tile that would inflict
+        # damage to any other agent.
+        q = Queue()
+        visited, graph = [], {}
+        root = ((x, y), 0, (None, None)) # ((x, y), steps, (parent_x, parent_y))
+        visited.append(root[0])
+        q.put(root)
+        while not q.empty():
+            (ix, iy), steps, parent = q.get() 
+            graph[(ix, iy)] = parent
+            if steps > n: # Only consider a certain search radius.
+                continue
+
+            # Check if the current tile would be lethal for some other agent
+            # and simultaneously escapable for our agent:
+            if (is_lethal_for_others(ix, iy, arena, others) and
+                is_escapable(ix, iy, arena)):
+                reachable = True    # Mark as reachable.
+                cx, cy = ix, iy     # Save the position.
+                break               # Stop the search.
+
+            # Traversing to the neighbouring nodes.
+            neighbours = get_free_neighbours(ix, iy, arena, bombs, others)
+            for neighb in neighbours:
+                if not neighb in visited:
+                    visited.append(neighb)
+                    q.put((neighb, steps+1, (ix, iy)))
+
+        if reachable:
+            # Traverse the graph backwards to recover the path from the agent
+            # to the target tile for the best bomb placement.
+            s = []
+            node = (cx, cy)
+            if graph[node] != (None, None) or node == (x, y):
+                while node != (None, None):
+                    s.insert(0, node)   # Insert at the front of the sequence.
+                    node = graph[node]  # Get the parent.
+
+            if len(s) > 1:
+                # We have found a tile for the best placement and we are not currently
+                # there. Get the very next tile on the path towards this position.
+                nx, ny = s[1]
+                # Only suggest movement if the next tile is not lethal.
+                if not is_lethal(nx, ny, arena, boms):
+                    rel_pos = np.array([nx-x, ny-y])
+                    return rel_pos, False
+            elif len(s) == 1:
+                # We have found a tile, and we are standing at this position.
+                return np.zeros(2), True
+    # We have either found no tiles for a good offensive bomb placement, or
+    # there is a lethal tile blocking the path towards this position.
+    return np.zeros(2), False
 
 def get_valid_action(game_state: dict):
     """
@@ -559,8 +711,12 @@ class CustomRegressor:
         --------
         Nothing.
         '''
+        # For every action:
         for i in range(len(ACTIONS)):
-            self.reg_model[i].partial_fit(X[i], y[i])
+            # Verify that we have data.
+            if X[i] and y[i]:
+                # Perform one epoch of SGD.
+                self.reg_model[i].partial_fit(X[i], y[i])
 
 
     def predict(self, X, action_idx=None):
