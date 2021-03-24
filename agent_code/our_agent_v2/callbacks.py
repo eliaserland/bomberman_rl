@@ -17,8 +17,9 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_final_v3"  # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'eps-greedy'              # Options: 'softmax', 'eps-greedy'
+FILENAME = "crates_final_v3"    # Base filename of model (excl. extensions).
+ACT_STRATEGY = 'eps-greedy'     # Options: 'softmax', 'eps-greedy'
+ONLY_USE_VALID_ACTIONS = True   # Enable/disable filtering of invalid actions.
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -80,8 +81,12 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    # --------- (1) Only allow valid actions: -----------------
-    mask, valid_actions = get_valid_action(game_state)
+    # --------- (1) Optionally, only allow valid actions: -----------------
+    # Switch to enable/disable filter of valid actions.
+    if ONLY_USE_VALID_ACTIONS:
+        mask, valid_actions = get_valid_actions(game_state)
+    else:
+        mask, valid_actions = np.ones(len(ACTIONS)) == 1, ACTIONS
 
     # --------- (2a) Softmax decision strategy: ---------------
     if self.act_strategy == 'softmax':
@@ -99,7 +104,7 @@ def act(self, game_state: dict) -> str:
             # Normalization for numerical stability.
             qtau = q_values/tau - np.max(q_values/tau)
             # Probabilities from Softmax function.
-            p = np.exp(qtau) / np.sum(np.exp(qtau))        
+            p = np.exp(qtau) / np.sum(np.exp(qtau))
         else:
             # Uniformly random action when Q not yet initialized.
             self.logger.debug("Choosing action uniformly at random.")
@@ -129,7 +134,7 @@ def transform(self, game_state: dict) -> np.array:
     Feature extraction from the game state dictionary. Wrapper that toggles
     between automatic and manual feature extraction.
     """
-    # This is the dict before the game begins and after it ends
+    # This is the dict before the game begins and after it ends.
     if game_state is None:
         return None
     if self.dr_model_is_fitted and not self.dr_override:
@@ -153,7 +158,6 @@ def state_to_features(game_state: dict) -> np.array:
     coins = game_state['coins']
     bombs = [xy for (xy, t) in game_state['bombs']]
     others = [xy for (n, s, b, xy) in game_state['others']]
- 
     #--------------------------------------------------------------------------
     # ---- DANGER ----
     # Boolean indicator telling if agent is currently standing in mortal danger.
@@ -161,9 +165,8 @@ def state_to_features(game_state: dict) -> np.array:
 
     # ---- ESCAPE ----
     # Direction towards the closest escape from imminent danger.
-    escape_direction = escape_dir(x, y, arena, bombs, others)    
+    escape_direction = escape_dir(x, y, arena, bombs, others)
     
-    #--------------------------------------------------------------------------
     # ---- OTHERS ----
     # Direction towards the best offensive tile against other agents.
     others_direction, others_reached = others_dir(x, y, 10, arena, bombs, others)
@@ -176,13 +179,13 @@ def state_to_features(game_state: dict) -> np.array:
     # Direction towards the best offensive tile for destroying crates.
     crates_direction, crates_reached = crates_dir(x, y, 30, arena, bombs, others)
  
-    #--------------------------------------------------------------------------
     # ---- ATTACK ----
-    # Enemy or crate, the optimum position for bomb-laying has been reached, 
-    # while having an available bomb and not having lethal status currently.
-    # TODO: Make this prioritze agents over crates.
-    target_acquired = int((others_reached or crates_reached) and bombs_left and not lethal)
-
+    # Enemy or crate, the optimum position for bomb-laying has been reached,
+    # while having an available bomb and not currently having a lethal status.
+    # Prioritizes agents over crates, and as such will ignore crate target tiles
+    # if a direction towards an enemy agent is given.
+    target_acquired = int((others_reached or (crates_reached and all(others_direction == (0,0))))
+                          and bombs_left and not lethal)
     #--------------------------------------------------------------------------
     # [DANGER,         ATTACK,             ESCAPE,           OTHERS,          COINS,           CRATES]
     # [lethal, target_aquired, escape_x, escape_y, other_x, other_y, coin_x, coin_y, crate_x, crate_y]
@@ -637,23 +640,30 @@ def others_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
     # there is a lethal tile blocking the path towards this position.
     return np.zeros(2), False
 
-def get_valid_action(game_state: dict):
+def get_valid_actions(game_state: dict, filter_level: str='basic'):
     """
-    Given the gamestate, check which actions are valid.
+    Given the gamestate, check which actions are valid. Has two filtering levels,
+    'basic' where only purely invalid moves are disallowed and 'full' where also
+    bad moves (bombing at inescapable tile, moving into lethal region) are 
+    forbidden.
 
     :param game_state:  A dictionary describing the current game board.
+    :param filter_level: Either 'basic' or 'full'
     :return: mask which ACTIONS are executable
              list of VALID_ACTIONS
     """
+
+    # TODO: Add option for filtering level, basic for only invalid moves or full filtering
+    # for disallowing bad moves (bombing in unescapable tile, moving into lethal).
+
     aggressive_play = True # Allow agent to drop bombs.
 
     # Gather information about the game state
-    arena = game_state['field']
-    _, score, bombs_left, (x, y) = game_state['self']
-    bombs = game_state['bombs']
-    bomb_xys = [xy for (xy, t) in bombs]
+    _, _, bombs_left, (x, y) = game_state['self'] 
+    arena  = game_state['field']
+    coins  = game_state['coins']
+    bombs  = [xy for (xy, t) in game_state['bombs']]
     others = [xy for (n, s, b, xy) in game_state['others']]
-    coins = game_state['coins']
     bomb_map = game_state['explosion_map']
     
     # Check for valid actions.
@@ -662,12 +672,24 @@ def get_valid_action(game_state: dict):
     valid_actions = []
     mask = np.zeros(len(ACTIONS))
 
+    # TODO: Could restict movement by not allowing moves to tiles with lethal status. However, if all 5 directions are lethal, all options must be allowed.
+
+    if filter_level == 'full':
+        # check lethal status of all directions
+
+    elif filter_level == 'basic':
+
+
     # Movement:
     for i, d in enumerate(directions):
+        if filter_level == 'full' and is_lethal(d[0], d[1], arena, bombs):
+            mask[i] = 0
+
+        
         if ((arena[d] == 0)    and # Is a free tile
             (bomb_map[d] <= 1) and # No ongoing explosion
             (not d in others)  and # Not occupied by other player
-            (not d in bomb_xys)):  # No bomb placed
+            (not d in bombs)):  # No bomb placed
 
             valid_actions.append(ACTIONS[i]) # Append the valid action.
             mask[i] = 1                      # Binary mask
@@ -684,6 +706,7 @@ def get_valid_action(game_state: dict):
     valid_actions = np.array(valid_actions)
 
     return mask, valid_actions
+
 class CustomRegressor:
     def __init__(self, estimator):
         # Create one regressor for each action separately.
