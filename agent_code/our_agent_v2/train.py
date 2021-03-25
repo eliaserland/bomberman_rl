@@ -432,6 +432,15 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         self.perform_export = False # Reset export flag
 
     # ---------- (7) Performance evaluation: ----------
+    # Get the numbers from the last round.
+    if 'COIN_COLLECTED' in events:
+        self.collected_coins += 1
+    if 'CRATE_DESTROYED' in events:
+        self.destroyed_crates += events.count('CRATE_DESTROYED')
+    if 'KILLED_OPPONENT' in events:
+        self.killed_enemies += events.count('KILLED_OPPONENT')
+    self.score_in_round += reward_from_events(self, events)
+
     # Total score in this game.
     score = np.sum(self.score_in_round)
    
