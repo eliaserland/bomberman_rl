@@ -17,9 +17,9 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_final_v3"    # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'eps-greedy'     # Options: 'softmax', 'eps-greedy'
-ONLY_USE_VALID_ACTIONS = True   # Enable/disable filtering of invalid actions.
+FILENAME = "crates_final_v4"     # Base filename of model (excl. extensions).
+ACT_STRATEGY = 'eps-greedy'      # Options: 'softmax', 'eps-greedy'
+ONLY_USE_VALID_ACTIONS = False   # Enable/disable filtering of invalid actions.
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -38,11 +38,10 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    # Save constants.
-    self.action_size = len(ACTIONS)
+    # Save the actions.
     self.actions = ACTIONS
 
-    # Assign decision strategy.
+    # Assign the decision strategy.
     self.act_strategy = ACT_STRATEGY
 
     # Incremental PCA for dimensionality reduction of game state.
@@ -62,7 +61,7 @@ def setup(self):
 
     elif self.train:
         self.logger.info("Setting up model from scratch.")
-        self.model = CustomRegressor(SGDRegressor(alpha=0.0001, warm_start=True)) #, penalty='elasticnet'))
+        self.model = CustomRegressor(SGDRegressor(alpha=0.0001, warm_start=True))
         if not self.dr_override:
             self.dr_model = IncrementalPCA(n_components=n_comp)
         else:
@@ -84,7 +83,7 @@ def act(self, game_state: dict) -> str:
     # --------- (1) Optionally, only allow valid actions: -----------------
     # Switch to enable/disable filter of valid actions.
     if ONLY_USE_VALID_ACTIONS:
-        mask, valid_actions = get_valid_actions(game_state)
+        mask, valid_actions = get_valid_actions(game_state, filter_level='full')
     else:
         mask, valid_actions = np.ones(len(ACTIONS)) == 1, ACTIONS
 
@@ -169,7 +168,7 @@ def state_to_features(game_state: dict) -> np.array:
     
     # ---- OTHERS ----
     # Direction towards the best offensive tile against other agents.
-    others_direction, others_reached = others_dir(x, y, 10, arena, bombs, others)
+    others_direction, others_reached = others_dir(x, y, 5, arena, bombs, others)
 
     # ---- COINS ----
     # Direction towards the closest reachable coin.
@@ -177,7 +176,7 @@ def state_to_features(game_state: dict) -> np.array:
 
     # ---- CRATES ----
     # Direction towards the best offensive tile for destroying crates.
-    crates_direction, crates_reached = crates_dir(x, y, 30, arena, bombs, others)
+    crates_direction, crates_reached = crates_dir(x, y, 10, arena, bombs, others)
  
     # ---- ATTACK ----
     # Enemy or crate, the optimum position for bomb-laying has been reached,
@@ -630,7 +629,7 @@ def others_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
                 # there. Get the very next tile on the path towards this position.
                 nx, ny = s[1]
                 # Only suggest movement if the next tile is not lethal.
-                if not is_lethal(nx, ny, arena, boms):
+                if not is_lethal(nx, ny, arena, bombs):
                     rel_pos = np.array([nx-x, ny-y])
                     return rel_pos, False
             elif len(s) == 1:
@@ -669,43 +668,61 @@ def get_valid_actions(game_state: dict, filter_level: str='basic'):
     # Check for valid actions.
     #            [    'UP',  'RIGHT',   'DOWN',   'LEFT', 'WAIT']
     directions = [(x, y-1), (x+1, y), (x, y+1), (x-1, y), (x, y)]
+    
+    # Initialization.
     valid_actions = []
     mask = np.zeros(len(ACTIONS))
+    disallow_bombing = False
+    lethal_status = np.zeros(len(directions))
 
-    # TODO: Could restict movement by not allowing moves to tiles with lethal status. However, if all 5 directions are lethal, all options must be allowed.
-
+    # Check the filtering level.
     if filter_level == 'full':
-        # check lethal status of all directions
+        # Check lethal status in all directions.
+        for i, (ix, iy) in enumerate(directions):
+            if not has_object(ix, iy, arena, 'wall'):
+                lethal_status[i] = int(is_lethal(ix, iy, arena, bombs))
+            else:
+                lethal_status[i] = -1
+        # Verify that there is at least one non-lethal tile in the surrounding.
+        if not any(lethal_status == 0):
+            # No non-lethal tile detected, we can only disallow waiting.
+            lethal_status = np.zeros(len(directions))
+            lethal_status[-1] = 1
+        
+        # Check escape status on the current tile.
+        if not is_escapable(x, y, arena):
+            disallow_bombing = True
 
     elif filter_level == 'basic':
-
+        # Could to other things here.
+        pass
+    else:
+        raise ValueError(f"Invalid option filter_level={filter_level}.")
 
     # Movement:
-    for i, d in enumerate(directions):
-        if filter_level == 'full' and is_lethal(d[0], d[1], arena, bombs):
-            mask[i] = 0
-
-        
-        if ((arena[d] == 0)    and # Is a free tile
-            (bomb_map[d] <= 1) and # No ongoing explosion
-            (not d in others)  and # Not occupied by other player
-            (not d in bombs)):  # No bomb placed
-
+    for i, d in enumerate(directions):        
+        if (arena[d] == 0    and    # Is a free tile
+            bomb_map[d] <= 1 and    # No ongoing explosion
+            not d in others  and    # Not occupied by other player
+            not d in bombs   and    # No bomb placed
+            lethal_status[i] == 0): # Is non-lethal.
             valid_actions.append(ACTIONS[i]) # Append the valid action.
             mask[i] = 1                      # Binary mask
             
     # Bombing:
-    if bombs_left and is_escapable(x, y, arena) and aggressive_play:
+    if bombs_left and aggressive_play and not disallow_bombing:
         valid_actions.append(ACTIONS[-1])
         mask[-1] = 1
 
-    # Convert binary mask to boolean mask of the valid moves.
-    mask = (mask == 1)
-    
-    # Convert list to numpy array (# TODO Is this neccesary?)
-    valid_actions = np.array(valid_actions)
+    mask = (mask == 1) # Convert binary mask to boolean mask.
+    valid_actions = np.array(valid_actions) # Convert list to numpy array
 
-    return mask, valid_actions
+    if len(valid_actions) == 0:
+        # The list is empty, there are no valid actions. Return all actions as 
+        # to not break the code by returning an empty list.
+        return np.ones(len(ACTIONS)) == 1, ACTIONS
+    else:
+        return mask, valid_actions
 
 class CustomRegressor:
     def __init__(self, estimator):

@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg") # Non-GUI backend, needed for plotting in non-main thread.
 import matplotlib.pyplot as plt
+plt.rcParams['lines.linewidth'] = 1.5
 
 from sklearn.base import clone
 
@@ -111,11 +112,12 @@ def setup_training(self):
     else:
         # Start a new historic record.
         self.historic_data = {
-            'score' : [],       # subplot 1
-            'coins' : [],       # subplot 2
-            'crates': [],       # subplot 3
-            'exploration' : [], # subplot 4
-            'games' : []        # subplot 1,2,3,4 x-axis
+            'score'  : [],       # subplot 1
+            'coins'  : [],       # subplot 2
+            'crates' : [],       # subplot 3
+            'enemies': [],       # subplot 4
+            'exploration' : [],  # subplot 5
+            'games'  : []        # subplot 1,2,3,4,5 x-axis
         }
         self.game_nr = 1
 
@@ -123,6 +125,7 @@ def setup_training(self):
     self.score_in_round    = 0
     self.collected_coins   = 0
     self.destroyed_crates  = 0
+    self.killed_enemies    = 0
     self.bomb_loop_penalty = 0
     self.perform_export    = False
 
@@ -143,51 +146,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
-        # TODO: NEED TO PREVENT LOOPS
-        # TODO: Rethink all rewards.
-        # TODO: Rethink the size of transition history, batch size and prio batch size. (perhaps even make it variable?)
-        # TODO: See if there are more, smarter rewards to give.
-        # TODO: Need to optimize the regularization in the regression fit.
 
     # ---------- (1) Add own events to hand out rewards: ----------
     # If the old state is not before the beginning of the game:
     if old_game_state:
         # Extract feature vector:
         state_old = state_to_features(old_game_state)
-        _, _, _, (x, y) = old_game_state['self']
-       
-        '''
-        # TODO: SEE OVER THIS. 
-        # ---- SMALL MOVEMENT LOOP PREVENTION ----
-        # Check if coordinate sequence is stricly alterating between two tiles.
-        self.coordinate_history.append((x, y))
-        if len(self.coordinate_history) == 4:
-            unique_coords = np.unique(self.coordinate_history, axis=0)
-            if len(unique_coords) == 2: # Requires maxlen=4 for coordinate_history deque.
-                is_different = []       # For pair-wise comparison.
-                for i in range(len(self.coordinate_history)-1):
-                    comparison = self.coordinate_history[i] != self.coordinate_history[i+1]
-                    is_different.append(comparison)
-                if all(is_different):
-                    events.append(OSCILLATION)
-        '''
-        '''
-        # If bomb was dropped:
-        if self_action == 'BOMB':
-            # ---- BOMB LOOP PREVENTION ----
-            # Incur penalty by bombs laid repeatedly on the same squares.
-            # Scales quadratically by the no. of repeated bombings.
-            self.bomb_history.append((x, y))
-            _, counts = np.unique(self.bomb_history, axis=0, return_counts=True)
-            self.bomb_loop_penalty = np.sum((counts-1)**2)
-            if self.bomb_loop_penalty > 0:
-                events.append(ALREADY_BOMBED_FIELD)
-        '''
 
-
-
-        
-        # Extract the lethal indicator for the old state.
+        # Extract the lethal indicator from the old state.
         islethal_old = state_old[0,0] == 1
         if islethal_old:
             # ---- WHEN IN LETHAL ----
@@ -295,7 +261,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if 'COIN_COLLECTED' in events:
         self.collected_coins += 1
     if 'CRATE_DESTROYED' in events:
-        self.destroyed_crates +=1
+        self.destroyed_crates += events.count('CRATE_DESTROYED')
+    if 'KILLED_OPPONENT' in events:
+        self.killed_enemies += events.count('KILLED_OPPONENT')
     self.score_in_round += reward_from_events(self, events)
 
 
@@ -471,6 +439,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.historic_data['score'].append(score)
     self.historic_data['coins'].append(self.collected_coins)
     self.historic_data['crates'].append(self.destroyed_crates)
+    self.historic_data['enemies'].append(self.killed_enemies)
     self.historic_data['games'].append(self.game_nr)   
     if self.act_strategy == 'eps-greedy':
         self.historic_data['exploration'].append(self.epsilon)
@@ -482,9 +451,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         pickle.dump(self.historic_data, file)
     
     # Reset game score, coins collected and one up the game count.
-    self.score_in_round  = 0
-    self.collected_coins = 0
+    self.score_in_round   = 0
+    self.collected_coins  = 0
     self.destroyed_crates = 0
+    self.killed_enemies   = 0
     self.game_nr += 1
     
     # Plot training progress every n:th game.
@@ -494,10 +464,11 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         score_list = self.historic_data['score']
         coins_list = self.historic_data['coins']
         crate_list = self.historic_data['crates']
+        other_list = self.historic_data['enemies']
         explr_list = self.historic_data['exploration']
 
         # Plotting
-        fig, ax = plt.subplots(4, sharex=True)
+        fig, ax = plt.subplots(5, figsize=(7.2, 5.4), sharex=True)
 
         # Total score per game.
         ax[0].plot(games_list, score_list)
@@ -514,15 +485,20 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         ax[2].set_title('Destroyed crates per game')
         ax[2].set_ylabel('Crates')
 
+        # Eliminiated opponents per game
+        ax[3].plot(games_list, other_list)
+        ax[3].set_title('Eliminated opponents per game')
+        ax[3].set_ylabel('Kills')
+
         # Exploration rate (epsilon/tau) per game.
-        ax[3].plot(games_list, explr_list)
+        ax[4].plot(games_list, explr_list)
         if self.act_strategy == 'eps-greedy':        
-            ax[3].set_title('$\epsilon$-greedy: Exploration rate $\epsilon$')
-            ax[3].set_ylabel('$\epsilon$')
+            ax[4].set_title('$\epsilon$-greedy: Exploration rate $\epsilon$')
+            ax[4].set_ylabel('$\epsilon$')
         elif self.act_strategy == 'softmax':
-            ax[3].set_title('Softmax: Exploration rate $\\tau$')
-            ax[3].set_ylabel('$\\tau$')
-        ax[3].set_xlabel('Game #')
+            ax[4].set_title('Softmax: Exploration rate $\\tau$')
+            ax[4].set_ylabel('$\\tau$')
+        ax[4].set_xlabel('Game #')
 
         # Export the figure.
         fig.tight_layout()
@@ -562,7 +538,7 @@ def reward_from_events(self, events: List[str]) -> int:
 
         # bombing
         BOMBED_GOAL         : bombing,
-        MISSED_GOAL         : -4*escape_movement, # to prevent self-bomb-laying loops
+        MISSED_GOAL         : -4*escape_movement, # Needed to prevent self-bomb-laying loops.
 
         # waiting
         WAITED_NECESSARILY  : waiting,
