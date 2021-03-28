@@ -19,7 +19,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 # ---------------- Parameters ----------------
 FILENAME = "crates_final_v4"     # Base filename of model (excl. extensions).
 ACT_STRATEGY = 'eps-greedy'      # Options: 'softmax', 'eps-greedy'
-ONLY_USE_VALID_ACTIONS = False   # Enable/disable filtering of invalid actions.
+ONLY_USE_VALID_ACTIONS = True    # Enable/disable filtering of invalid actions.
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -95,7 +95,7 @@ def act(self, game_state: dict) -> str:
         if self.train:
             tau = self.tau
         else:
-            tau = 0.1 # TODO: Hyper-parameter which needs optimization.
+            tau = 0.1
         if self.model_is_fitted:
             self.logger.debug("Choosing action from softmax distribution.")
             # Q-values for the current state.
@@ -116,7 +116,7 @@ def act(self, game_state: dict) -> str:
         if self.train:
             random_prob = self.epsilon
         else:
-            random_prob = 0.05 # TODO: Hyper-parameter which needs optimization.
+            random_prob = 0.01
         if random.random() < random_prob or not self.model_is_fitted:
             self.logger.debug("Choosing action uniformly at random.")
             execute_action = np.random.choice(valid_actions)
@@ -320,8 +320,6 @@ def is_escapable(x: int, y: int, arena: np.array) -> bool:
     Assuming the agent is standing at (x,y), check if an escape from a bomb
     dropped at its own position is possible (not considering other agents'
     active bombs). Returns True if an escape from own bomb is possible.
-    # TODO: is_escapable() needs to consider that another agents might block its way.
-    # TODO: is_escapable() should consider the effect of other agent's active bombs.
     """
     if has_object(x, y, arena, 'free'):
         directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
@@ -450,8 +448,7 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
     # path towards the best candidate tile.
     return np.zeros(2), False
 
-def coins_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, others: list) -> np.array:
-    """
+def coins_dir(x: int, y: int, coins: list, arena: np.array, self.coordinate_history = deque([], 4)
     Find the direction towards the closest revealed and reachable coin.
 
     Parameters:
@@ -651,10 +648,6 @@ def get_valid_actions(game_state: dict, filter_level: str='basic'):
     :return: mask which ACTIONS are executable
              list of VALID_ACTIONS
     """
-
-    # TODO: Add option for filtering level, basic for only invalid moves or full filtering
-    # for disallowing bad moves (bombing in unescapable tile, moving into lethal).
-
     aggressive_play = True # Allow agent to drop bombs.
 
     # Gather information about the game state
@@ -718,7 +711,7 @@ def get_valid_actions(game_state: dict, filter_level: str='basic'):
     valid_actions = np.array(valid_actions) # Convert list to numpy array
 
     if len(valid_actions) == 0:
-        # The list is empty, there are no valid actions. Return all actions as 
+        # The list is empty, there are no valid actions. Return all actions as
         # to not break the code by returning an empty list.
         return np.ones(len(ACTIONS)) == 1, ACTIONS
     else:

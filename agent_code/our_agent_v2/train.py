@@ -24,7 +24,7 @@ Transition = namedtuple('Transition',
 # ------------------------ HYPER-PARAMETERS -----------------------------------
 # General hyper-parameters:
 TRANSITION_HISTORY_SIZE = 1000  # Keep only ... last transitions.
-BATCH_SIZE              = 500  # Size of batch in TD-learning.
+BATCH_SIZE              = 500   # Size of batch in TD-learning.
 TRAIN_FREQ              = 1     # Train model every ... game.
 
 # N-step TD Q-learning:
@@ -32,7 +32,7 @@ GAMMA   = 0.8  # Discount factor.
 N_STEPS = 3    # Number of steps to consider real, observed rewards.
 
 # Prioritized experience replay:
-PRIO_EXP_REPLAY   = True      # Toggle on/off.
+PRIO_EXP_REPLAY   = True    # Toggle on/off.
 PRIO_EXP_FRACTION = 0.25    # Fraction of BATCH_SIZE to keep.
 
 # Dimensionality reduction from learning experience.
@@ -44,7 +44,7 @@ DR_HISTORY_SIZE   = 50000   # Keep the ... last states for DR learning.
 # Epsilon-Greedy: (0 < epsilon < 1)
 EXPLORATION_INIT  = 1.0
 EXPLORATION_MIN   = 0.005
-EXPLORATION_DECAY = 0.99995 #0.99995
+EXPLORATION_DECAY = 0.99995
 
 # Softmax: (0 < tau < infty)
 TAU_INIT  = 15
@@ -73,9 +73,6 @@ CLOSER_TO_CRATE = "CLOSER_TO_CRATE"
 FURTHER_FROM_CRATE = "FURTHER_FROM_CRATE"
 SURVIVED_STEP = "SURVIVED_STEP"
 
-#ALREADY_BOMBED_FIELD = "ALREADY_BOMBED_FIELD"
-#OSCILLATION = "OSCILLATION"
-
 def setup_training(self):
     """
     Initialise self for training purpose.
@@ -85,9 +82,7 @@ def setup_training(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     # Ques to store the transition tuples and coordinate history of agent.
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # long term memory of complete step
-    self.bomb_history = deque([], 5)                    # short term memory of bomb placements by agent.
-    self.coordinate_history = deque([], 4)
+    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
     self.n_step_transitions = deque([], N_STEPS)
     
     # Storage of states for feature extration function learning.
@@ -393,10 +388,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         (self.game_nr % DR_FREQ == 0) and
         (len(self.state_history) > DR_MINIBATCH_SIZE)):
         
-        # Minibatch learning on the collected samples # TODO: Try out sampling with/without replacement.
+        # Minibatch learning on the collected samples.
         for _ in range(DR_EPOCHS):
             batch = random.sample(self.state_history, DR_MINIBATCH_SIZE)
-            self.dr_model.partial_fit(np.vstack(batch)) #TODO: Fix this broken POS.
+            self.dr_model.partial_fit(np.vstack(batch))
         self.dr_model_is_fitted = True
 
         # Since the feature extraction function is now changed, we need to start
@@ -407,7 +402,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
         # Empty lists of transitions, bomb history and game states.
         self.transitions.clear()
-        self.bomb_history.clear()
         #self.state_history.clear()
 
         # Reset epsilon/tau to their inital values
