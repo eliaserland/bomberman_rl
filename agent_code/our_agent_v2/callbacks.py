@@ -1,12 +1,10 @@
 import os
 import pickle
 import random
-from operator import itemgetter
 
 import numpy as np
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import SGDRegressor
-from sklearn.decomposition import KernelPCA
 from sklearn.decomposition import IncrementalPCA
 from sklearn.base import clone
 from queue import Queue
@@ -17,9 +15,9 @@ import events as e
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 # ---------------- Parameters ----------------
-FILENAME = "crates_final_v4"     # Base filename of model (excl. extensions).
-ACT_STRATEGY = 'eps-greedy'      # Options: 'softmax', 'eps-greedy'
-ONLY_USE_VALID_ACTIONS = True    # Enable/disable filtering of invalid actions.
+FILENAME = "final_agent"        # Base filename of model (excl. extensions).
+ACT_STRATEGY = 'eps-greedy'     # Options: 'softmax', 'eps-greedy'
+ONLY_USE_VALID_ACTIONS = False  # Enable/disable filtering of invalid actions.
 # --------------------------------------------
 
 fname = f"{FILENAME}.pt" # Adding the file extension.
@@ -448,7 +446,8 @@ def crates_dir(x: int, y: int, n: int, arena: np.array, bombs: list, others: lis
     # path towards the best candidate tile.
     return np.zeros(2), False
 
-def coins_dir(x: int, y: int, coins: list, arena: np.array, self.coordinate_history = deque([], 4)
+def coins_dir(x: int, y: int, coins: list, arena: np.array, bombs: list, others: list) -> np.array:
+    """
     Find the direction towards the closest revealed and reachable coin.
 
     Parameters:
